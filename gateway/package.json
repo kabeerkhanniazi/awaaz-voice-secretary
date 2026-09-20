@@ -1,0 +1,16 @@
+{
+  "name": "awaaz-gateway",
+  "version": "1.0.0",
+  "description": "Awaaz voice gateway: relays a screened call between the caller page, the AssemblyAI Voice Agent API and the owner's phone.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/pcm_processor.test.js && node test/concurrent_routing.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ws": "^8.21.3"
+  }
+}

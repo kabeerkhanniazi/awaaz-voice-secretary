@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Call Kabeer</title>
+  <style>
+    :root {
+      --bg: #F7F7F5; --surface: #FFFFFF; --text: #1C1C1A; --muted: #6B6B66; --line: #E2E2DE;
+      --accent: #1F6F5C; --on-accent: #FFFFFF; --danger: #B3402A; --warn: #9A6200;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121212; --surface: #191919; --text: #EDEDEB; --muted: #9D9D98; --line: #2E2E2E;
+        --accent: #5BB79E; --on-accent: #0B1F1A; --danger: #E0735E; --warn: #E0A84A;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+    main { width: 100%; max-width: 360px; text-align: center; }
+    .avatar {
+      position: relative;
+      width: 88px; height: 88px; margin: 0 auto 20px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 34px; font-weight: 600;
+    }
+    /* A single soft ring while the call is being set up */
+    .avatar.ringing::after {
+      content: ''; position: absolute; inset: -6px; border-radius: 50%;
+      border: 2px solid var(--accent); opacity: 0;
+      animation: ring 1.6s ease-out infinite;
+    }
+    @keyframes ring { 0% { transform: scale(.92); opacity: .6; } 100% { transform: scale(1.18); opacity: 0; } }
+    h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+    .lead { margin-top: 6px; color: var(--muted); font-size: 15px; line-height: 1.45; }
+    .notice {
+      display: none; margin-top: 20px; padding: 12px 14px;
+      border-radius: 10px; border: 1px solid var(--line); background: var(--surface);
+      color: var(--danger); font-size: 14px; line-height: 1.4; text-align: left;
+    }
+    .status {
+      margin-top: 28px; min-height: 22px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-size: 16px; font-weight: 500;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+    .status-dot.connected { background: var(--accent); }
+    .status-dot.connecting { background: var(--warn); animation: blink 1.2s infinite; }
+    .status-dot.disconnected { background: var(--danger); }
+    @keyframes blink { 50% { opacity: .35; } }
+    .call-subtitle { margin-top: 6px; min-height: 20px; color: var(--muted); font-size: 14px; line-height: 1.4; }
+    .call-subtitle.error { color: var(--danger); }
+    .timer { margin-top: 4px; min-height: 18px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+    .controls { margin-top: 36px; display: flex; justify-content: center; gap: 32px; }
+    .control { display: flex; flex-direction: column; align-items: center; }
+    .round {
+      width: 68px; height: 68px; border-radius: 50%; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: transform .1s, opacity .2s;
+    }
+    .round:active { transform: scale(.95); }
+    .round:disabled { opacity: .4; cursor: not-allowed; }
+    .round svg { width: 28px; height: 28px; fill: currentColor; }
+    .call { background: var(--accent); color: var(--on-accent); }
+    .end { background: var(--danger); color: #FFFFFF; }
+    .mute { background: var(--surface); color: var(--text); border: 1px solid var(--line); }
+    .mute[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    .label { margin-top: 8px; font-size: 13px; color: var(--muted); }
+    .hidden { display: none !important; }
+    footer { margin-top: 40px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="avatar" id="avatar">K</div>
+    <h1>Kabeer</h1>
+    <p class="lead">My assistant answers first and lets me know you're calling.</p>
+
+    <!-- Browsers only allow the microphone on https or localhost -->
+    <div class="notice" id="insecureWarning">This page needs a secure (https) connection to use your microphone.</div>
+
+    <div id="callingUI" class="hidden">
+      <div class="status" id="callStatus"><span class="status-dot connecting" id="statusDot"></span> Calling...</div>
+      <div class="call-subtitle" id="callSubtitle"></div>
+      <div class="timer" id="callTimer"></div>
+    </div>
+
+    <div class="controls">
+      <div class="control" id="callSection">
+        <button class="round call" id="btnCall" onclick="startCall()" aria-label="Call Kabeer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/></svg>
+        </button>
+        <div class="label" id="callLabel">Call</div>
+      </div>
+      <div class="control hidden" id="muteControl">
+        <button class="round mute" id="btnMute" onclick="toggleMute()" aria-pressed="false" aria-label="Mute">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+        </button>
+        <div class="label" id="muteLabel">Mute</div>
+      </div>
+      <div class="control hidden" id="endControl">
+        <button class="round end" id="btnEnd" onclick="endCall()" aria-label="End call">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.27 11.27 0 0 0-2.67-1.85.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
+        </button>
+        <div class="label">End</div>
+      </div>
+    </div>
+
+    <footer>Uses your microphone during the call. The call may be transcribed so Kabeer can follow up.</footer>
+  </main>
+
+  <script>
+    // --- State ---
+    let aaiWs = null;
+    let relayWs = null;
+    let audioCtx = null;
+    let stream = null;
+    let workletNode = null;
+    let ready = false;
+    let playbackTime = 0;
+    let currentCallId = null;
+    let sessionTimer = null;
+
+    // Persona from /api/voice-token (single source of truth on the gateway).
+    // Sent to AssemblyAI as the first session.update of the session.
+    let persona = null;
+
+    // Directives are spoken with reply.create, which leaves the system prompt
+    // untouched. pendingDirective tracks the reply it produced so "spoken" is
+    // only reported for that reply.
+    let lastAppliedDirectiveVersion = 0;
+    let pendingDirective = null;
+
+    // Agent audio scheduled for playback, stopped when the caller barges in
+    let scheduledSources = [];
+
+    // Patch In: after the secretary's hand-off line, the mic is streamed to the
+    // gateway (and on to Kabeer's phone) instead of AssemblyAI
+    let bridgePending = false;
+    let bridgeActive = false;
+    // Set when Kabeer ends the call: hang up after the secretary's goodbye
+    let endAfterDirective = false;
+
+    // Tool results must wait until the reply that called the tool has finished
+    let replyActive = false;
+    let pendingToolResults = [];
+    // The secretary called end_call mid-reply: hang up when that reply is done
+    let endWhenReplyDone = false;
+    // The caller's last words were a goodbye
+    let callerSaidBye = false;
+    const GOODBYE = /\b(good ?bye|bye|bye-bye)\b/i;
+
+    // B6: Check Origin on Page Load
+    window.addEventListener('DOMContentLoaded', () => {
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const isHttps = window.location.protocol === 'https:';
+      if (!isLocal && !isHttps) {
+        document.getElementById('insecureWarning').style.display = 'block';
+        const callBtn = document.getElementById('btnCall');
+        callBtn.disabled = true;
+        callBtn.style.opacity = '0.5';
+        callBtn.style.cursor = 'not-allowed';
+      }
+    });
+
+    // The page shows no transcript: details go to the browser console, and only
+    // errors reach the caller, in the subtitle (kept there when the call ends)
+    let lastError = null;
+    function addLog(text, cls) {
+      if (cls === 'error') {
+        console.error('[Call]', text);
+        lastError = text;
+        const subtitle = document.getElementById('callSubtitle');
+        subtitle.innerText = text;
+        subtitle.classList.add('error');
+      } else {
+        console.log('[Call]', text);
+      }
+    }
+
+    function updateStatus(text, state) {
+      const dot = document.getElementById('statusDot');
+      dot.className = 'status-dot ' + state;
+      const statusEl = document.getElementById('callStatus');
+      statusEl.innerHTML = '';
+      statusEl.appendChild(dot);
+      statusEl.appendChild(document.createTextNode(' ' + text));
+      if (state === 'connected') startTimer();
+      if (state !== 'connecting') document.getElementById('avatar').classList.remove('ringing');
+    }
+
+    function setSubtitle(text) {
+      if (lastError) return; // keep an error visible
+      document.getElementById('callSubtitle').innerText = text;
+    }
+
+    // Call timer, from the moment the call connects
+    let timerStart = null;
+    let timerInterval = null;
+    function startTimer() {
+      if (timerStart) return;
+      timerStart = Date.now();
+      const el = document.getElementById('callTimer');
+      const tick = () => {
+        const s = Math.floor((Date.now() - timerStart) / 1000);
+        el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      };
+      tick();
+      timerInterval = setInterval(tick, 1000);
+    }
+    function stopTimer() {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      timerStart = null;
+    }
+
+    // Caller-side mute: mic audio simply isn't sent while muted
+    let micMuted = false;
+    function toggleMute() {
+      micMuted = !micMuted;
+      const button = document.getElementById('btnMute');
+      button.setAttribute('aria-pressed', String(micMuted));
+      button.setAttribute('aria-label', micMuted ? 'Unmute' : 'Mute');
+      document.getElementById('muteLabel').textContent = micMuted ? 'Unmute' : 'Mute';
+    }
+
+    // B4: Directive Sanitization
+    function sanitizeDirective(rawText) {
+      if (!rawText) return '';
+      // Strip control chars and newlines
+      let clean = rawText.replace(/[\x00-\x1F\x7F\r\n]+/g, ' ').trim();
+      // The directive is embedded in double quotes in the agent instructions
+      clean = clean.replace(/"/g, "'");
+      // Cap length at 300 chars
+      if (clean.length > 300) clean = clean.substring(0, 300);
+      return clean;
+    }
+
+    // B5: Correct Audio Gesture Ordering
+    async function startCall() {
+      // Swap the call button for the in-call controls
+      lastError = null;
+      const subtitle = document.getElementById('callSubtitle');
+      subtitle.classList.remove('error');
+      subtitle.innerText = '';
+      document.getElementById('callTimer').textContent = '';
+      document.getElementById('callSection').classList.add('hidden');
+      document.getElementById('callingUI').classList.remove('hidden');
+      document.getElementById('muteControl').classList.remove('hidden');
+      document.getElementById('endControl').classList.remove('hidden');
+      document.getElementById('avatar').classList.add('ringing');
+      if (micMuted) toggleMute();
+
+      try {
+        // Step 1: Construct AudioContext synchronously (first statement, NO await before it)
+        const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioCtxClass();
+
+        // Step 2: Call resume() synchronously
+        const resumePromise = audioCtx.resume();
+
+        // Step 3: Await getUserMedia with differentiated errors
+        updateStatus('Allow microphone access', 'connecting');
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+        } catch (micErr) {
+          if (micErr.name === 'NotAllowedError') {
+            throw new Error('Microphone access is blocked. Allow it in your browser, then call again.');
+          } else if (micErr.name === 'NotFoundError' || micErr.name === 'DevicesNotFoundError') {
+            throw new Error('No microphone was found on this device.');
+          } else if (micErr.name === 'SecurityError') {
+            throw new Error('This page needs a secure (https) connection to use your microphone.');
+          } else {
+            throw new Error('Your microphone could not be started.');
+          }
+        }
+
+        // Step 4: Await AudioContext resume & load AudioWorklet module
+        await resumePromise;
+        await audioCtx.audioWorklet.addModule('/pcm-processor.js');
+
+        // Step 5: Network calls are now safe (user gesture context already claimed)
+        updateStatus('Calling...', 'connecting');
+        const tokenRes = await fetch('/api/voice-token');
+        if (!tokenRes.ok) {
+          let detail = await tokenRes.text();
+          try { detail = JSON.parse(detail).error || detail; } catch (_) {}
+          throw new Error(`Gateway ${tokenRes.status}: ${detail}`);
+        }
+
+        const { token, systemPrompt, greeting, voice, tools } = await tokenRes.json();
+        // Without a persona the agent would run as a generic assistant: refuse instead
+        if (!token || !systemPrompt) {
+          throw new Error('Gateway returned an incomplete voice session (missing token or persona).');
+        }
+        persona = { systemPrompt, greeting, voice, tools: tools || [] };
+
+        // Register call with Gateway
+        updateStatus('Calling...', 'connecting');
+        const callRes = await fetch('/api/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callerName: 'Web Caller', topic: 'Direct Voice Call' }),
+        });
+        if (!callRes.ok) throw new Error('Call registration rejected by gateway: ' + await callRes.text());
+        const callData = await callRes.json();
+        currentCallId = callData.callId;
+
+        // Connect Gateway Relay WebSocket (C1: call routing)
+        const relayProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        relayWs = new WebSocket(`${relayProtocol}//${window.location.host}`);
+        relayWs.binaryType = 'arraybuffer'; // Kabeer's voice arrives as raw PCM16 frames
+        relayWs.onopen = () => {
+          console.log('[Relay] Connected to gateway. Registering caller for', currentCallId);
+          relayWs.send(JSON.stringify({
+            type: 'REGISTER_CALLER',
+            callId: currentCallId,
+          }));
+        };
+
+        // Handle incoming Master Directives from mobile app
+        relayWs.onmessage = (event) => {
+          if (event.data instanceof ArrayBuffer) {
+            if (bridgeActive) schedulePcm16(new Uint8Array(event.data));
+            return;
+          }
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'BRIDGE_ENDED') {
+              addLog('Kabeer is no longer on the line.', 'error');
+              cleanup('Call Ended');
+              return;
+            }
+            if (msg.type === 'TAKE_MESSAGE') {
+              // Nobody answered in time: the secretary offers to take a message
+              if (!bridgeActive && !bridgePending) {
+                // Her standing instructions still say "checking whether Kabeer is
+                // available"; change them too, or she keeps saying that
+                if (aaiWs && aaiWs.readyState === WebSocket.OPEN) {
+                  aaiWs.send(JSON.stringify({
+                    type: 'session.update',
+                    session: {
+                      system_prompt: persona.systemPrompt +
+                        "\n\nUpdate: Kabeer is not available for this call. Stop saying you are checking. " +
+                        'Take a message (step 5), then say goodbye and call end_call.',
+                    },
+                  }));
+                }
+                const why = msg.reason === 'busy'
+                  ? 'Kabeer is on another call right now.'
+                  : "Kabeer can't take the call right now.";
+                sendDirective(
+                  why + ' Tell the caller this politely and offer to take a message: ' +
+                  'ask what they would like him to know and how or when to call them back. Speak as his secretary.',
+                  0,
+                );
+              }
+              return;
+            }
+            if (msg.type === 'DIRECTIVE_UPDATED') {
+              const { action, spokenDirective, directiveVersion, holdMinutes } = msg.data || msg;
+
+              // B3: Monotonically increasing directive version check
+              const ver = Number(directiveVersion) || 1;
+              if (ver <= lastAppliedDirectiveVersion) {
+                console.log(`[Directive] Ignoring stale version ${ver} (current: ${lastAppliedDirectiveVersion})`);
+                return;
+              }
+              lastAppliedDirectiveVersion = ver;
+
+              if (action === 'hangup') {
+                addLog('Kabeer ended the call.', '');
+                cleanup('Call Ended');
+                return;
+              }
+              if (action === 'patchedToMaster') bridgePending = true;
+              if (action === 'declined') endAfterDirective = true;
+
+              const instructions = buildDirectiveInstructions(action, spokenDirective, holdMinutes);
+              if (!instructions) return;
+              console.log(`[Directive] v${ver} ${action}: ${instructions}`);
+              sendDirective(instructions, ver);
+            }
+          } catch (e) {
+            console.error('[Relay] Directive error:', e);
+          }
+        };
+
+        // Setup AudioWorklet for 24 kHz PCM16 downsampling
+        const source = audioCtx.createMediaStreamSource(stream);
+        workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor', {
+          processorOptions: {
+            inputSampleRate: audioCtx.sampleRate,
+            targetSampleRate: 24000,
+            chunkSamples: 1200, // 50 ms per input.audio message
+          },
+        });
+
+        // Connect to AssemblyAI Voice Agent
+        updateStatus('Calling...', 'connecting');
+        const wsUrl = new URL('wss://agents.assemblyai.com/v1/ws');
+        wsUrl.searchParams.set('token', token);
+        aaiWs = new WebSocket(wsUrl);
+
+        playbackTime = audioCtx.currentTime;
+
+        workletNode.port.onmessage = (e) => {
+          if (micMuted) return;
+          if (bridgeActive) {
+            if (relayWs && relayWs.readyState === WebSocket.OPEN) relayWs.send(e.data);
+            return;
+          }
+          if (ready && aaiWs && aaiWs.readyState === WebSocket.OPEN) {
+            const b64 = btoa(String.fromCharCode(...new Uint8Array(e.data)));
+            aaiWs.send(JSON.stringify({ type: 'input.audio', audio: b64 }));
+          }
+        };
+        source.connect(workletNode).connect(audioCtx.destination);
+
+        aaiWs.addEventListener('open', () => {
+          updateStatus('Calling...', 'connecting');
+          // Must be the first message: AssemblyAI configures the agent from it
+          // and only then replies with session.ready. Greeting and voice cannot
+          // be changed after this point.
+          aaiWs.send(JSON.stringify({
+            type: 'session.update',
+            session: {
+              system_prompt: persona.systemPrompt,
+              greeting: persona.greeting,
+              output: { voice: persona.voice },
+              tools: persona.tools,
+            },
+          }));
+        });
+
+        aaiWs.addEventListener('message', (event) => {
+          // After Patch In the secretary's session is retired; ignore its last events
+          if (event.target !== aaiWs) return;
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === 'session.ready') {
+            ready = true;
+            console.log('[AssemblyAI] session.ready', msg.session_id, msg.config);
+            updateStatus('Connected', 'connected');
+            setSubtitle("You're speaking with Kabeer's assistant.");
+
+            // A directive that arrived before the session was ready
+            if (pendingDirective && pendingDirective.attempts === 0) dispatchDirective();
+
+            // B7: 10-minute session lifetime guard
+            if (sessionTimer) clearTimeout(sessionTimer);
+            sessionTimer = setTimeout(() => {
+              addLog('⏱️ Session ended — 10 minute limit reached.', 'error');
+              updateStatus('Call ended', 'disconnected');
+              if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+                relayWs.send(JSON.stringify({ type: 'SESSION_EXPIRED', callId: currentCallId }));
+              }
+              cleanup('Session Ended (10m limit)');
+            }, 600000);
+          }
+          else if (msg.type === 'session.updated') {
+            console.log('[AssemblyAI] session.updated', msg.config);
+          }
+          else if (msg.type === 'tool.call') {
+            handleToolCall(msg.tool || msg);
+          }
+          else if (msg.type === 'reply.done') {
+            replyActive = false;
+            const sentResults = pendingToolResults.length > 0;
+            flushToolResults();
+            if (endWhenReplyDone) {
+              endWhenReplyDone = false;
+              endAfterPlayback();
+            }
+            // A directive held back while she was answering goes out now. If
+            // tool results just went out she usually answers those first, which
+            // would swallow the directive: give her a moment to start, and if she
+            // does, the directive waits for that reply to finish too.
+            const held = pendingDirective;
+            if (held && held.waitedForReply) {
+              if (!sentResults) dispatchDirective();
+              else setTimeout(() => {
+                if (pendingDirective === held && held.waitedForReply && !replyActive) dispatchDirective();
+              }, 1500);
+            }
+            // Caller barged in: silence audio already queued for the old reply
+            if (msg.status === 'interrupted') stopPlayback();
+          }
+          else if (msg.type === 'reply.started') {
+            replyActive = true;
+            const d = pendingDirective;
+            if (d && d.awaitingReply) {
+              // First reply after reply.create is the directive being spoken
+              d.awaitingReply = false;
+              d.replyId = msg.reply_id;
+              clearTimeout(d.timer);
+              d.timer = setTimeout(() => {
+                if (pendingDirective === d) retryOrFailDirective('no_agent_transcript');
+              }, 30000);
+            }
+          }
+          else if (msg.type === 'reply.audio') {
+            const raw = atob(msg.data);
+            const bytes = new Uint8Array(raw.length);
+            for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+            schedulePcm16(bytes);
+          }
+          else if (msg.type === 'transcript.user') {
+            addLog('You: ' + msg.text, 'you');
+            // Only the caller's latest words count ("bye... oh, one more thing")
+            callerSaidBye = GOODBYE.test(msg.text);
+            if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+              relayWs.send(JSON.stringify({
+                type: 'TRANSCRIPT_UPDATE',
+                callId: currentCallId,
+                speaker: 'Caller',
+                text: msg.text,
+              }));
+            }
+          }
+          else if (msg.type === 'transcript.agent') {
+            addLog('Secretary: ' + msg.text, 'agent');
+            // Both said goodbye: hang up like a phone call would, in case the
+            // secretary doesn't call end_call herself
+            if (callerSaidBye && GOODBYE.test(msg.text) && !msg.interrupted && !bridgeActive && !bridgePending) {
+              callerSaidBye = false;
+              endAfterPlayback();
+            }
+            if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+              relayWs.send(JSON.stringify({
+                type: 'TRANSCRIPT_UPDATE',
+                callId: currentCallId,
+                speaker: 'Secretary',
+                text: msg.text,
+              }));
+            }
+
+            const d = pendingDirective;
+            if (d && d.replyId && msg.reply_id === d.replyId) {
+              if (msg.interrupted) {
+                retryOrFailDirective('interrupted_by_caller');
+              } else {
+                clearTimeout(d.timer);
+                pendingDirective = null;
+                reportDirective('DIRECTIVE_STATE', { state: 'spoken', version: d.version });
+                if (bridgePending) startBridge();
+                if (endAfterDirective) endAfterPlayback();
+              }
+            }
+          }
+          else if (msg.type === 'session.error' || msg.type === 'error') {
+            // D1: Surface AssemblyAI error frames verbatim in UI
+            const errDetails = [msg.code, msg.message, msg.param && `(field: ${msg.param})`]
+              .filter(Boolean).join(' — ') || JSON.stringify(msg);
+            // Mid-call errors are usually recoverable: log them, don't alarm the caller
+            addLog('⚠️ AssemblyAI Error: ' + errDetails, ready ? '' : 'error');
+            if (!ready) updateStatus('Error', 'disconnected');
+          }
+          else if (msg.type === 'session.ended') {
+            addLog('Session ended by server.', '');
+            cleanup();
+          }
+        });
+
+        aaiWs.addEventListener('close', (e) => {
+          if (!aaiWs) return; // closed by cleanup()
+          addLog(`AssemblyAI connection closed (code ${e.code}${e.reason ? ': ' + e.reason : ''}).`, ready ? '' : 'error');
+          cleanup(ready ? 'Call Ended' : 'Failed to connect');
+        });
+
+        aaiWs.addEventListener('error', () => {
+          // The close event that follows carries the code and reason
+          addLog('AssemblyAI WebSocket connection error.', 'error');
+        });
+
+      } catch (err) {
+        addLog(err.message, 'error');
+        console.error(err);
+        cleanup('Failed to connect');
+      }
+    }
+
+    function stopPlayback() {
+      for (const s of scheduledSources) {
+        try { s.stop(); } catch (_) {}
+      }
+      scheduledSources = [];
+      if (audioCtx) playbackTime = audioCtx.currentTime;
+    }
+
+    function buildDirectiveInstructions(action, spokenDirective, holdMinutes) {
+      const voiceRule = " Speak as Kabeer's secretary and refer to Kabeer in the third person.";
+      if (action === 'holding') {
+        const minutes = Number(holdMinutes) || 2;
+        const duration = minutes === 1 ? 'about a minute' : `about ${minutes} minutes`;
+        return `Kabeer has asked the caller to hold for ${duration}. Tell the caller this politely now.` + voiceRule;
+      }
+      if (action === 'patchedToMaster') {
+        return 'Kabeer has decided to take this call. Tell the caller now that you are connecting them to Kabeer and ask them to stay on the line.' + voiceRule;
+      }
+      if (action === 'declined') {
+        return 'Kabeer is not available right now. Tell the caller politely that he is unavailable, that you have noted their name and reason for calling, and that he will get back to them. Then say goodbye.' + voiceRule;
+      }
+      const clean = sanitizeDirective(spokenDirective);
+      if (!clean) return '';
+      return `Kabeer has sent you this message to pass on to the caller: "${clean}". Relay it to the caller now in your own words. If it is written from Kabeer's point of view (using "I" or "me"), convert it so you are talking about Kabeer.` + voiceRule;
+    }
+
+    // The secretary's tools run here: save_caller_details goes to the gateway,
+    // which updates Kabeer's phone and briefs his voice session
+    function handleToolCall(tool) {
+      let args = tool.arguments || {};
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch (_) { args = {}; }
+      }
+      let ok = false;
+      if (tool.name === 'save_caller_details') {
+        console.log('[Call] caller details', args);
+        reportDirective('CALLER_DETAILS', {
+          name: args.name || '',
+          company: args.company || '',
+          reason: args.reason || '',
+          urgent: args.urgent === true,
+          message: args.message || '',
+          callback: args.callback || '',
+        });
+        ok = true;
+      } else if (tool.name === 'end_call') {
+        // The secretary finished the conversation: hang up once her goodbye
+        // (usually still arriving) has been played
+        console.log('[Call] secretary ended the call');
+        ok = true;
+        if (replyActive) endWhenReplyDone = true;
+        else endAfterPlayback();
+      }
+      pendingToolResults.push({
+        type: 'tool.result',
+        call_id: tool.call_id,
+        result: JSON.stringify(ok ? { saved: true } : { error: 'unknown tool' }),
+        is_error: !ok,
+      });
+      if (!replyActive) flushToolResults();
+    }
+
+    function flushToolResults() {
+      while (pendingToolResults.length && aaiWs && aaiWs.readyState === WebSocket.OPEN) {
+        aaiWs.send(JSON.stringify(pendingToolResults.shift()));
+      }
+    }
+
+    function reportDirective(type, fields) {
+      if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+        relayWs.send(JSON.stringify({ type, callId: currentCallId, ...fields }));
+      }
+    }
+
+    // reply.create makes the agent speak now without touching the system
+    // prompt, so the secretary persona stays intact across directives.
+    function sendDirective(instructions, version) {
+      if (!aaiWs) {
+        reportDirective('DIRECTIVE_FAILED', { reason: 'call_not_connected', version });
+        // No secretary to announce it, but Kabeer can still take the call
+        if (bridgePending) startBridge();
+        return;
+      }
+      if (pendingDirective) clearTimeout(pendingDirective.timer);
+      pendingDirective = { version, instructions, attempts: 0, replyId: null, awaitingReply: false, timer: null };
+      reportDirective('DIRECTIVE_STATE', { state: 'injected', version });
+      // Before session.ready the directive waits; the session.ready handler sends it
+      if (ready) dispatchDirective();
+    }
+
+    function dispatchDirective() {
+      const d = pendingDirective;
+      if (!d || !aaiWs || aaiWs.readyState !== WebSocket.OPEN) return;
+      // reply.create sent while the agent is still answering is silently
+      // dropped: wait for that reply to finish (with a safety net)
+      if (replyActive && !d.forceSend) {
+        if (!d.waitedForReply) {
+          d.waitedForReply = true;
+          clearTimeout(d.timer);
+          // Safety net in case reply.done never comes
+          d.timer = setTimeout(() => {
+            if (pendingDirective === d) { d.forceSend = true; dispatchDirective(); }
+          }, 15000);
+        }
+        return;
+      }
+      d.waitedForReply = false;
+      d.forceSend = false;
+      d.attempts++;
+      d.replyId = null;
+      d.awaitingReply = true;
+      aaiWs.send(JSON.stringify({ type: 'reply.create', instructions: d.instructions }));
+      clearTimeout(d.timer);
+      d.timer = setTimeout(() => {
+        if (pendingDirective === d) retryOrFailDirective('timeout_no_agent_speech');
+      }, 10000);
+    }
+
+    function retryOrFailDirective(reason) {
+      const d = pendingDirective;
+      if (!d) return;
+      if (d.attempts < 2 && aaiWs && aaiWs.readyState === WebSocket.OPEN) {
+        console.warn(`[Directive] ${reason}; retrying once`);
+        dispatchDirective();
+        return;
+      }
+      clearTimeout(d.timer);
+      pendingDirective = null;
+      console.error(`[Directive] Failed: ${reason}`);
+      reportDirective('DIRECTIVE_FAILED', { reason, version: d.version });
+      // Kabeer is waiting to talk: connect even if the hand-off line wasn't spoken
+      if (bridgePending) startBridge();
+      // Kabeer ended the call: end it even if the goodbye wasn't spoken
+      if (endAfterDirective) endAfterPlayback();
+    }
+
+    // Hangs up once the secretary's goodbye has finished playing
+    function endAfterPlayback() {
+      endAfterDirective = false;
+      const remaining = audioCtx ? Math.max(0, playbackTime - audioCtx.currentTime) : 0;
+      setTimeout(() => {
+        if (relayWs) cleanup('Call Ended');
+      }, remaining * 1000 + 500);
+    }
+
+    // Plays little-endian PCM16 mono at 24 kHz (secretary replies and Kabeer's voice)
+    function schedulePcm16(bytes) {
+      if (!audioCtx || bytes.length < 2) return;
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length - (bytes.length % 2));
+      const float32 = new Float32Array(view.byteLength / 2);
+      for (let i = 0; i < float32.length; i++) float32[i] = view.getInt16(i * 2, true) / 32768;
+      const buffer = audioCtx.createBuffer(1, float32.length, 24000);
+      buffer.getChannelData(0).set(float32);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(audioCtx.destination);
+      // Small lead so network jitter on the live bridge doesn't cause gaps
+      const now = audioCtx.currentTime;
+      if (playbackTime < now) playbackTime = now + (bridgeActive ? 0.08 : 0);
+      src.start(playbackTime);
+      playbackTime += buffer.duration;
+      scheduledSources.push(src);
+      src.onended = () => {
+        scheduledSources = scheduledSources.filter(s => s !== src);
+      };
+    }
+
+    // Hands the caller from the secretary to Kabeer once the hand-off line has
+    // finished playing: ends the AssemblyAI session and streams the mic to the gateway
+    function startBridge() {
+      if (!bridgePending || bridgeActive) return;
+      bridgePending = false;
+      const remaining = audioCtx ? Math.max(0, playbackTime - audioCtx.currentTime) : 0;
+      setTimeout(() => {
+        if (!relayWs) return; // call ended meanwhile
+        const oldAaiWs = aaiWs;
+        aaiWs = null; // the close handler must not treat this as the call ending
+        ready = false;
+        if (sessionTimer) clearTimeout(sessionTimer);
+        if (oldAaiWs && oldAaiWs.readyState === WebSocket.OPEN) {
+          oldAaiWs.send(JSON.stringify({ type: 'session.end' }));
+          setTimeout(() => oldAaiWs.close(), 1000);
+        }
+        bridgeActive = true;
+        relayWs.send(JSON.stringify({ type: 'BRIDGE_READY', callId: currentCallId }));
+        updateStatus('Connected to Kabeer', 'connected');
+        setSubtitle("You're now speaking with Kabeer.");
+        addLog('📞 Connected to Kabeer.', 'agent');
+      }, remaining * 1000 + 300);
+    }
+
+    function endCall() {
+      if (ready && aaiWs && aaiWs.readyState === WebSocket.OPEN) {
+        aaiWs.send(JSON.stringify({ type: 'session.end' }));
+        // Don't leave the caller stuck if session.ended never arrives
+        setTimeout(() => { if (aaiWs) cleanup(); }, 3000);
+      } else {
+        cleanup();
+      }
+    }
+
+    function cleanup(reason) {
+      ready = false;
+      bridgePending = false;
+      bridgeActive = false;
+      endAfterDirective = false;
+      replyActive = false;
+      pendingToolResults = [];
+      endWhenReplyDone = false;
+      callerSaidBye = false;
+      if (pendingDirective) {
+        clearTimeout(pendingDirective.timer);
+        pendingDirective = null;
+      }
+      if (sessionTimer) clearTimeout(sessionTimer);
+      stopPlayback();
+      // Null the globals before closing so the close handlers see a finished call
+      const oldAaiWs = aaiWs;
+      const oldRelayWs = relayWs;
+      aaiWs = null;
+      relayWs = null;
+      oldAaiWs?.close();
+      oldRelayWs?.close();
+      stream?.getTracks().forEach(t => t.stop());
+      audioCtx?.close();
+      audioCtx = null;
+      stream = null;
+      updateStatus(reason || 'Call Ended', 'disconnected');
+      if (!lastError) document.getElementById('callSubtitle').innerText = 'The call has ended.';
+      stopTimer();
+      document.getElementById('avatar').classList.remove('ringing');
+      document.getElementById('muteControl').classList.add('hidden');
+      document.getElementById('endControl').classList.add('hidden');
+      // Offer another call once this one has settled
+      setTimeout(() => {
+        if (aaiWs || relayWs) return; // a new call already started
+        document.getElementById('callLabel').textContent = 'Call again';
+        document.getElementById('callSection').classList.remove('hidden');
+      }, 1200);
+    }
+
+    window.addEventListener('pagehide', () => {
+      if (aaiWs && aaiWs.readyState === WebSocket.OPEN) {
+        aaiWs.send(JSON.stringify({ type: 'session.end' }));
+      }
+    });
+  </script>
+</body>
+</html>

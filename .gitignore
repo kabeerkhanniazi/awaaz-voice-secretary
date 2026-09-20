@@ -1,0 +1,29 @@
+# Secrets and local config
+.env
+*.env
+!.env.example
+app/android/local.properties
+app/android/key.properties
+*.jks
+*.keystore
+
+# Dependencies and build output
+node_modules/
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/android/.gradle/
+app/android/app/build/
+app/ios/Pods/
+app/ios/Flutter/ephemeral/
+app/ios/.symlinks/
+**/DerivedData/
+
+# Editors and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
