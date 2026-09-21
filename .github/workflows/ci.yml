@@ -37,3 +37,5 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --fatal-infos
       - run: flutter test
+      - name: Demo build settings
+        run: flutter test test/demo_config_test.dart --dart-define=AWAAZ_DEMO_GATEWAY=wss://demo.example.app

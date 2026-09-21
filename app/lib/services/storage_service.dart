@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/demo_config.dart';
 import '../models/call_record_model.dart';
 import '../models/secretary_task_model.dart';
 import '../models/contact_model.dart';
@@ -15,7 +16,9 @@ class StorageService {
   static const String _keyGatewayUrl = 'awaaz_gateway_url';
   static const String _keyGatewaySecret = 'awaaz_gateway_secret';
 
-  static const String defaultGatewayUrl = 'wss://aivs.up.railway.app';
+  static const String _liveGatewayUrl = 'wss://aivs.up.railway.app';
+  // The demo build points at the demo gateway instead of Kabeer's real line
+  static String get defaultGatewayUrl => DemoConfig.enabled ? DemoConfig.gateway : _liveGatewayUrl;
 
   static const String _keySampleDataRemoved = 'awaaz_sample_data_removed';
   static const String _keyAutoVoice = 'awaaz_auto_voice';

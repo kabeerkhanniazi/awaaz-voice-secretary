@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../core/demo_config.dart';
 import '../core/theme/app_theme.dart';
 import '../models/scenario_profile.dart';
 import '../providers/call_provider.dart';
@@ -9,6 +10,7 @@ import '../providers/storage_provider.dart';
 import '../services/background_service.dart';
 import '../services/websocket_service.dart';
 import '../widgets/common.dart';
+import '../widgets/demo_line_card.dart';
 
 class SettingsTab extends ConsumerStatefulWidget {
   const SettingsTab({super.key});
@@ -59,6 +61,7 @@ class _SettingsTabState extends ConsumerState<SettingsTab> with WidgetsBindingOb
         children: [
           const SectionHeader('Connection'),
           const _ConnectionStatus(),
+          const DemoLineCard(),
           ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 20),
             title: const Text('Gateway'),
@@ -75,7 +78,8 @@ class _SettingsTabState extends ConsumerState<SettingsTab> with WidgetsBindingOb
               },
             ),
           ),
-          ListTile(
+          // The demo gateway identifies this phone by its line, not a secret
+          if (!DemoConfig.enabled) ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 20),
             title: const Text('Gateway secret'),
             subtitle: Text(hasSecret ? 'Set' : 'Not set', style: TextStyle(color: hasSecret ? null : scheme.error)),
@@ -167,7 +171,7 @@ class _SettingsTabState extends ConsumerState<SettingsTab> with WidgetsBindingOb
   Future<void> _setStandby(bool enabled) async {
     if (enabled) {
       final storage = ref.read(storageServiceProvider);
-      if (storage.getGatewaySecret().isEmpty) {
+      if (storage.getGatewaySecret().isEmpty && !DemoConfig.enabled) {
         showMessage(context, 'Set the gateway secret first.');
         return;
       }

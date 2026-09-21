@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
+import '../core/demo_config.dart';
 import '../models/call_record_model.dart';
 
 /// Post-call analysis through the gateway (/api/analyze-call).
@@ -27,6 +28,8 @@ class AssemblyAIService {
         headers: {
           'Content-Type': 'application/json',
           if (authSecret != null && authSecret.isNotEmpty) 'X-Awaaz-Secret': authSecret,
+          // The demo gateway has no secret; it accepts a registered line instead
+          if (DemoConfig.line.isNotEmpty) 'X-Awaaz-Line': DemoConfig.line,
         },
         body: jsonEncode({
           'transcript': transcript.map((t) => t.toJson()).toList(),

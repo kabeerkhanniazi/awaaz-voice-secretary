@@ -47,6 +47,7 @@
     @keyframes ring { 0% { transform: scale(.92); opacity: .6; } 100% { transform: scale(1.18); opacity: 0; } }
     h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
     .lead { margin-top: 6px; color: var(--muted); font-size: 15px; line-height: 1.45; }
+    .note { margin-top: 10px; min-height: 18px; color: var(--muted); font-size: 13px; line-height: 1.45; }
     .notice {
       display: none; margin-top: 20px; padding: 12px 14px;
       border-radius: 10px; border: 1px solid var(--line); background: var(--surface);
@@ -89,6 +90,7 @@
     <div class="avatar" id="avatar">K</div>
     <h1>Kabeer</h1>
     <p class="lead">My assistant answers first and lets me know you're calling.</p>
+    <p class="note" id="lineNote"></p>
 
     <!-- Browsers only allow the microphone on https or localhost -->
     <div class="notice" id="insecureWarning">This page needs a secure (https) connection to use your microphone.</div>
@@ -164,18 +166,47 @@
     let callerSaidBye = false;
     const GOODBYE = /\b(good ?bye|bye|bye-bye)\b/i;
 
+    // On the judges' demo deployment each phone has its own line, named in the
+    // link the Awaaz app shows (/?line=CODE)
+    const demoLine = (new URLSearchParams(window.location.search).get('line') || '').trim().toUpperCase();
+
+    function disableCall() {
+      const callBtn = document.getElementById('btnCall');
+      callBtn.disabled = true;
+      callBtn.style.opacity = '0.5';
+      callBtn.style.cursor = 'not-allowed';
+    }
+
     // B6: Check Origin on Page Load
     window.addEventListener('DOMContentLoaded', () => {
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const isHttps = window.location.protocol === 'https:';
       if (!isLocal && !isHttps) {
         document.getElementById('insecureWarning').style.display = 'block';
-        const callBtn = document.getElementById('btnCall');
-        callBtn.disabled = true;
-        callBtn.style.opacity = '0.5';
-        callBtn.style.cursor = 'not-allowed';
+        disableCall();
       }
+      showLineNote();
     });
+
+    // One line under the intro, so nobody mistakes message-taking for a fault
+    async function showLineNote() {
+      const note = document.getElementById('lineNote');
+      let demoMode = false;
+      try {
+        demoMode = Boolean((await (await fetch('/health', { cache: 'no-store' })).json()).demoMode);
+      } catch (e) {
+        // No note is better than a wrong one
+        return;
+      }
+      if (!demoMode) {
+        note.innerText = "Kabeer is a real person. If he's busy, his secretary will take your message.";
+      } else if (demoLine) {
+        note.innerText = 'Demo line ' + demoLine + '. This call rings your own phone: answer it in the Awaaz app.';
+      } else {
+        note.innerText = 'This is the Awaaz demo line. Open the link shown in the Awaaz app to call your own phone.';
+        disableCall();
+      }
+    }
 
     // The page shows no transcript: details go to the browser console, and only
     // errors reach the caller, in the subtitle (kept there when the call ends)
@@ -316,8 +347,11 @@
         const callRes = await fetch('/api/call', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ callerName: 'Web Caller', topic: 'Direct Voice Call' }),
+          body: JSON.stringify({ callerName: 'Web Caller', topic: 'Direct Voice Call', ...(demoLine ? { line: demoLine } : {}) }),
         });
+        if (callRes.status === 400 && (await callRes.clone().json().catch(() => ({}))).error === 'line_required') {
+          throw new Error('Open the demo link shown in the Awaaz app to call your own phone.');
+        }
         if (!callRes.ok) throw new Error('Call registration rejected by gateway: ' + await callRes.text());
         const callData = await callRes.json();
         currentCallId = callData.callId;

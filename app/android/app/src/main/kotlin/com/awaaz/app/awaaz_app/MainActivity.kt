@@ -97,6 +97,7 @@ class MainActivity : FlutterActivity() {
                         this,
                         call.argument<String>("url") ?: "",
                         call.argument<String>("secret") ?: "",
+                        call.argument<String>("line") ?: "",
                     )
                     result.success(null)
                 }

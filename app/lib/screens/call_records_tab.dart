@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/call_record_model.dart';
 import '../providers/dashboard_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/demo_line_card.dart';
 import 'call_detail_screen.dart';
 
 class CallRecordsTab extends ConsumerStatefulWidget {
@@ -71,6 +72,7 @@ class _CallRecordsTabState extends ConsumerState<CallRecordsTab> {
       ),
       body: Column(
         children: [
+          const DemoLineCard(),
           SizedBox(
             height: 44,
             child: ListView(

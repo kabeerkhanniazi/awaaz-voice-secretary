@@ -31,9 +31,16 @@ const TAKE_MESSAGE_AFTER_MS = Number(process.env.TAKE_MESSAGE_AFTER_MS) || 90 * 
 // Ended calls are kept (in memory) until a phone confirms it logged them
 const ENDED_CALLS_MAX = 50;
 const ENDED_CALL_TTL_MS = 24 * 60 * 60 * 1000;
+// Demo deployment for judges: no secret, and every phone gets its own line. A
+// phone registers with a line code and only ever sees calls placed through
+// that line's link (/?line=CODE). Off by default, where every phone and every
+// call share the empty line and nothing changes.
+const DEMO_MODE = process.env.DEMO_MODE === '1';
+const LINE_CODE = /^[A-Z0-9]{6,12}$/;
 
 // Track mobile app WebSocket clients and active calls
 const mobileClients = new Set();
+const mobileLines = new Map();       // mobile WebSocket -> line code ('' outside demo mode)
 const activeCalls = new Map();
 const callSockets = new Map();       // callId -> caller WebSocket
 const socketToCallId = new Map();    // WebSocket -> callId
@@ -51,9 +58,21 @@ const MAX_CALL_NOTES = 200;
 // phone as MISSED_CALLS when it next registers
 const endedCalls = [];
 
+const lineOfSocket = (ws) => mobileLines.get(ws) ?? '';
+const lineOfCall = (callId) => activeCalls.get(callId)?.line ?? '';
+
+// A line code from a request or message, or '' when there is none (always ''
+// outside demo mode, so a normal deployment has exactly one line)
+function lineCode(value) {
+  if (!DEMO_MODE) return '';
+  const code = String(value || '').trim().toUpperCase();
+  return LINE_CODE.test(code) ? code : '';
+}
+
 function rememberEndedCall(call) {
   endedCalls.push({
     callId: call.callId,
+    line: call.line || '',
     startedAt: call.timestamp,
     endedAt: new Date().toISOString(),
     details: call.details,
@@ -64,10 +83,13 @@ function rememberEndedCall(call) {
   while (endedCalls.length > ENDED_CALLS_MAX) endedCalls.shift();
 }
 
-function missedCalls() {
+function missedCalls(line) {
   const cutoff = Date.now() - ENDED_CALL_TTL_MS;
-  return endedCalls.filter(c => !c.logged && Date.parse(c.endedAt) > cutoff);
+  return endedCalls.filter(c => c.line === line && !c.logged && Date.parse(c.endedAt) > cutoff);
 }
+
+// What a phone may see of a missed call (no internal bookkeeping)
+const missedCallView = ({ logged, line, ...c }) => c;
 
 // Offers to take a message if Kabeer hasn't acted on the call in time
 function scheduleTakeMessage(callId, delay = TAKE_MESSAGE_AFTER_MS) {
@@ -85,10 +107,10 @@ function scheduleTakeMessage(callId, delay = TAKE_MESSAGE_AFTER_MS) {
     }
     current.tookMessage = true;
     // "He's on another call" is kinder than "he can't take your call"
-    const busy = [...activeCalls.values()].some(c => c.callId !== callId &&
+    const busy = [...activeCalls.values()].some(c => c.callId !== callId && c.line === current.line &&
       (bridgeMobile.has(c.callId) || masterSessions.get(c.callId)?.kabeerEngaged));
     callerWs.send(JSON.stringify({ type: 'TAKE_MESSAGE', reason: busy ? 'busy' : 'unavailable' }));
-    broadcastToMobile({ type: 'TAKING_MESSAGE', callId });
+    broadcastToLine(current.line, { type: 'TAKING_MESSAGE', callId });
     console.log(`[Call] ${callId} unanswered; secretary is taking a message`);
   }, delay);
   call.messageTimer.unref?.();
@@ -113,7 +135,7 @@ function startMasterSession(callId, phoneWs) {
       if (phoneWs.readyState === WebSocket.OPEN) phoneWs.send(JSON.stringify(command));
     },
     otherCallers: () => [...activeCalls.values()]
-      .filter(c => c.callId !== callId && !c.bridged && callSockets.has(c.callId))
+      .filter(c => c.callId !== callId && c.line === call.line && !c.bridged && callSockets.has(c.callId))
       .map(c => c.details || {}),
     onEnded: () => {
       if (masterSessions.get(callId) === session) masterSessions.delete(callId);
@@ -126,9 +148,9 @@ function startMasterSession(callId, phoneWs) {
 }
 
 // Kabeer's secretary on one call knows who else is waiting
-function notifyOtherSessions(callId) {
+function notifyOtherSessions(callId, line = lineOfCall(callId)) {
   for (const [id, session] of masterSessions) {
-    if (id !== callId) session.onOtherCallersChanged();
+    if (id !== callId && (session.call.line || '') === line) session.onOtherCallersChanged();
   }
 }
 
@@ -425,6 +447,8 @@ const server = http.createServer(async (req, res) => {
       assemblyaiKeyPresent: !!ASSEMBLYAI_KEY,
       buildSha: BUILD_SHA,
       uptime: process.uptime(),
+      // The caller page reads this to show the right note for the line it is on
+      demoMode: DEMO_MODE,
     }));
     return;
   }
@@ -524,10 +548,18 @@ const server = http.createServer(async (req, res) => {
     readBody(req, res, MAX_CALL_BODY_BYTES, (body) => {
       try {
         const payload = JSON.parse(body);
+        // On the demo deployment a call belongs to the line in its link
+        const line = lineCode(payload.line);
+        if (DEMO_MODE && !line) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'line_required' }));
+          return;
+        }
         // Unguessable: the callId is what lets a socket speak for a call
         const callId = `call_${crypto.randomUUID()}`;
         const callData = {
           callId,
+          line,
           callerName: String(payload.callerName || 'Web Caller').slice(0, 80),
           phoneNumber: String(payload.phoneNumber || '+1 (555) 019-2834').slice(0, 40),
           topic: String(payload.topic || 'Voice Call').slice(0, 120),
@@ -539,10 +571,10 @@ const server = http.createServer(async (req, res) => {
         };
         activeCalls.set(callId, callData);
 
-        // Immediately notify all mobile clients
-        broadcastToMobile(incomingCallMessage(callData));
+        // Ring the phones on this call's line
+        const rang = broadcastToLine(line, incomingCallMessage(callData));
 
-        console.log(`[Call] Incoming ${callId} — notified ${mobileClients.size} mobile client(s)`);
+        console.log(`[Call] Incoming ${callId}${line ? ` on line ${line}` : ''} — notified ${rang} phone(s)`);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'initiated', callId }));
@@ -557,7 +589,14 @@ const server = http.createServer(async (req, res) => {
   // POST /api/analyze-call — summary, follow-up and sentiment for a finished
   // call. Uses an LLM (it costs money), so only Kabeer's phone may call it.
   if (pathname === '/api/analyze-call' && req.method === 'POST') {
-    if (!secretMatches(req.headers['x-awaaz-secret'])) {
+    // Demo phones have no secret; they may use it while their line is registered
+    const demoLine = lineCode(req.headers['x-awaaz-line']);
+    const demoAllowed = demoLine && [...mobileLines.values()].includes(demoLine);
+    if (demoAllowed && rateLimited(req)) {
+      sendTooManyRequests(res);
+      return;
+    }
+    if (!secretMatches(req.headers['x-awaaz-secret']) && !demoAllowed) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Unauthorized' }));
       return;
@@ -610,28 +649,35 @@ wss.on('connection', (ws) => {
 
       switch (type) {
         case 'REGISTER_MOBILE': {
-          if (!secretMatches(msg.authSecret || msg.secret)) {
-            const error = GATEWAY_AUTH_SECRET
-              ? 'Invalid gateway auth secret'
-              : 'GATEWAY_AUTH_SECRET is not configured on the server';
+          // Demo deployment: a line code instead of the secret. Normal
+          // deployment: the secret, and everything is on the one line ''.
+          const line = lineCode(msg.line);
+          const allowed = DEMO_MODE ? Boolean(line) : secretMatches(msg.authSecret || msg.secret);
+          if (!allowed) {
+            const error = DEMO_MODE
+              ? 'This demo line needs a line code (update the app)'
+              : GATEWAY_AUTH_SECRET
+                ? 'Invalid gateway auth secret'
+                : 'GATEWAY_AUTH_SECRET is not configured on the server';
             console.warn(`[WebSocket] Mobile client auth failure: ${error}`);
             ws.send(JSON.stringify({ type: 'AUTH_FAILED', error }));
             ws.close();
             return;
           }
           mobileClients.add(ws);
+          mobileLines.set(ws, line);
           socketRoles.set(ws, 'mobile');
-          console.log(`[WebSocket] Mobile client registered (total: ${mobileClients.size})`);
-          ws.send(JSON.stringify({ type: 'REGISTERED_SUCCESS' }));
-          // Calls that ended while no phone logged them
-          const missed = missedCalls();
+          console.log(`[WebSocket] Mobile client registered${line ? ` on line ${line}` : ''} (total: ${mobileClients.size})`);
+          ws.send(JSON.stringify({ type: 'REGISTERED_SUCCESS', ...(DEMO_MODE ? { demo: true, line } : {}) }));
+          // Calls that ended while no phone on this line logged them
+          const missed = missedCalls(line);
           if (missed.length) {
-            ws.send(JSON.stringify({ type: 'MISSED_CALLS', calls: missed.map(({ logged, ...c }) => c) }));
+            ws.send(JSON.stringify({ type: 'MISSED_CALLS', calls: missed.map(missedCallView) }));
           }
           // Replay calls still in progress so a phone that reconnects doesn't lose them
           for (const call of activeCalls.values()) {
             const callerWs = callSockets.get(call.callId);
-            if (callerWs && callerWs.readyState === WebSocket.OPEN) {
+            if (call.line === line && callerWs && callerWs.readyState === WebSocket.OPEN) {
               ws.send(JSON.stringify(incomingCallMessage(call)));
             }
           }
@@ -666,8 +712,9 @@ wss.on('connection', (ws) => {
           const { callId, action, spokenDirective, directiveVersion } = data;
           console.log(`[Master] Directive for ${callId}: action=${action}, ver=${directiveVersion}`);
 
-          // C3: Restart Resilience / Unknown Call
-          if (!callId || !activeCalls.has(callId) || !callSockets.has(callId)) {
+          // C3: Restart Resilience / Unknown Call. A call on another line is
+          // treated as unknown, so one demo phone cannot steer another's call.
+          if (!callId || !activeCalls.has(callId) || !callSockets.has(callId) || lineOfCall(callId) !== lineOfSocket(ws)) {
             console.warn(`[Master] Unknown callId or caller disconnected: ${callId}`);
             ws.send(JSON.stringify({
               type: 'DIRECTIVE_FAILED',
@@ -729,15 +776,16 @@ wss.on('connection', (ws) => {
             return;
           }
           const callId = socketToCallId.get(ws);
+          const line = lineOfCall(callId);
           const payload = msg.data || msg;
           if (type === 'DIRECTIVE_STATE') {
-            broadcastToMobile({ type, callId, state: String(payload.state || ''), version: Number(payload.version) || 0 });
+            broadcastToLine(line, { type, callId, state: String(payload.state || ''), version: Number(payload.version) || 0 });
           } else if (type === 'DIRECTIVE_FAILED') {
-            broadcastToMobile({ type, callId, reason: String(payload.reason || 'unknown'), version: Number(payload.version) || 0 });
+            broadcastToLine(line, { type, callId, reason: String(payload.reason || 'unknown'), version: Number(payload.version) || 0 });
           } else if (type === 'TRANSCRIPT_UPDATE') {
             const speaker = payload.speaker === 'Secretary' ? 'Secretary' : 'Caller';
             const text = String(payload.text || '').slice(0, MAX_TRANSCRIPT_CHARS);
-            broadcastToMobile({ type, callId, speaker, text, isFinal: payload.isFinal ?? true });
+            broadcastToLine(line, { type, callId, speaker, text, isFinal: payload.isFinal ?? true });
             // Keep notes for Kabeer's secretary session, and brief it live
             const call = activeCalls.get(callId);
             if (call && text) {
@@ -746,7 +794,7 @@ wss.on('connection', (ws) => {
               masterSessions.get(callId)?.onCallTranscript(speaker, text);
             }
           } else {
-            broadcastToMobile({ type, callId, reason: '10_minute_limit' });
+            broadcastToLine(line, { type, callId, reason: '10_minute_limit' });
           }
           break;
         }
@@ -755,7 +803,7 @@ wss.on('connection', (ws) => {
           // Kabeer's phone recognised the caller in his contacts
           if (role !== 'mobile') return;
           const call = activeCalls.get(msg.callId);
-          if (!call) return;
+          if (!call || call.line !== lineOfSocket(ws)) return;
           const clean = (value, max) => String(value || '').replace(/[\x00-\x1F\x7F]+/g, ' ').trim().slice(0, max);
           call.context = {
             relationship: clean(msg.relationship, 40),
@@ -773,7 +821,7 @@ wss.on('connection', (ws) => {
           const call = activeCalls.get(callId);
           if (!call || !mergeCallerDetails(call, msg.data || msg)) return;
           console.log(`[Call] ${callId} details: ${JSON.stringify(call.details)}`);
-          broadcastToMobile(callerDetailsMessage(call));
+          broadcastToLine(call.line, callerDetailsMessage(call));
           masterSessions.get(callId)?.onCallerDetails();
           notifyOtherSessions(callId);
           break;
@@ -802,7 +850,7 @@ wss.on('connection', (ws) => {
           const callId = msg.callId;
           const callerWs = callSockets.get(callId);
           const call = activeCalls.get(callId);
-          if (!call || call.bridged || !callerWs || callerWs.readyState !== WebSocket.OPEN || !ASSEMBLYAI_KEY) {
+          if (!call || call.line !== lineOfSocket(ws) || call.bridged || !callerWs || callerWs.readyState !== WebSocket.OPEN || !ASSEMBLYAI_KEY) {
             ws.send(JSON.stringify({
               type: 'MASTER_SESSION_STATE',
               callId: callId || null,
@@ -818,15 +866,15 @@ wss.on('connection', (ws) => {
         case 'SYNC_MISSED_CALLS': {
           // A caller the phone had waiting hung up: fetch what the secretary took down
           if (role !== 'mobile') return;
-          const missed = missedCalls();
-          ws.send(JSON.stringify({ type: 'MISSED_CALLS', calls: missed.map(({ logged, ...c }) => c) }));
+          const missed = missedCalls(lineOfSocket(ws));
+          ws.send(JSON.stringify({ type: 'MISSED_CALLS', calls: missed.map(missedCallView) }));
           break;
         }
 
         case 'CALL_LOGGED': {
           // The phone saved this call; don't report it as missed
           if (role !== 'mobile') return;
-          const ended = endedCalls.find(c => c.callId === msg.callId);
+          const ended = endedCalls.find(c => c.callId === msg.callId && c.line === lineOfSocket(ws));
           if (ended) ended.logged = true;
           break;
         }
@@ -851,6 +899,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (mobileClients.has(ws)) {
       mobileClients.delete(ws);
+      mobileLines.delete(ws);
       console.log('[WebSocket] Mobile client disconnected');
     }
     // The phone left mid-bridge: the caller would otherwise hear silence forever
@@ -868,6 +917,7 @@ wss.on('connection', (ws) => {
     if (callId) {
       if (callSockets.get(callId) === ws) callSockets.delete(callId);
       socketToCallId.delete(ws);
+      const endedLine = lineOfCall(callId);
       const endedCall = activeCalls.get(callId);
       if (endedCall) {
         clearTimeout(endedCall.messageTimer);
@@ -877,9 +927,9 @@ wss.on('connection', (ws) => {
       endBridge(callId);
       stopMasterSession(callId);
       console.log(`[WebSocket] Caller disconnected for ${callId}`);
-      notifyOtherSessions(callId);
-      // Notify mobile client caller ended
-      broadcastToMobile({
+      notifyOtherSessions(callId, endedLine);
+      // Tell the phones on that line the caller has gone
+      broadcastToLine(endedLine, {
         type: 'CALLER_HUNG_UP',
         callId,
       });
@@ -905,11 +955,18 @@ function callerDetailsMessage(call) {
   return { type: 'CALLER_DETAILS', callId: call.callId, ...call.details };
 }
 
-function broadcastToMobile(payload) {
+// Sends to the phones on one line; returns how many it reached. Outside demo
+// mode every phone and call is on the line '', so this reaches every phone.
+function broadcastToLine(line, payload) {
   const jsonStr = JSON.stringify(payload);
+  let sent = 0;
   mobileClients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(jsonStr);
+    if (lineOfSocket(ws) === line && ws.readyState === WebSocket.OPEN) {
+      ws.send(jsonStr);
+      sent++;
+    }
   });
+  return sent;
 }
 
 // Forget calls whose caller page registered but never connected its socket,
@@ -919,7 +976,7 @@ setInterval(() => {
   for (const [callId, call] of activeCalls) {
     if (!callSockets.has(callId) && now - call.createdAt > STALE_CALL_MS) {
       activeCalls.delete(callId);
-      broadcastToMobile({ type: 'CALLER_HUNG_UP', callId });
+      broadcastToLine(call.line || '', { type: 'CALLER_HUNG_UP', callId });
       console.log(`[Call] ${callId} never connected; removed`);
     }
   }
@@ -940,7 +997,9 @@ server.listen(PORT, '0.0.0.0', () => {
   if (!ASSEMBLYAI_KEY) {
     console.error('[ERROR] ASSEMBLYAI_API_KEY not found in environment. Callers will get HTTP 503.');
   }
-  if (!GATEWAY_AUTH_SECRET) {
+  if (DEMO_MODE) {
+    console.log('[Demo] DEMO_MODE is on: phones register with a line code, no secret. Every call needs /?line=CODE.');
+  } else if (!GATEWAY_AUTH_SECRET) {
     console.error('[ERROR] GATEWAY_AUTH_SECRET not set. The phone app cannot connect until it is.');
   }
 });

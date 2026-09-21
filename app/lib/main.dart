@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'core/demo_config.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/storage_provider.dart';
 import 'screens/dashboard_screen.dart';
@@ -11,6 +12,7 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
   await StorageService(prefs).removeLegacySampleData();
   await StorageService.loadSecrets(prefs);
+  await DemoConfig.load(prefs);
 
   runApp(
     ProviderScope(

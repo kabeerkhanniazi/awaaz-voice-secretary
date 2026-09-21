@@ -54,6 +54,7 @@ class AwaazService : Service() {
         private const val PREFS = "awaaz_service"
         private const val KEY_URL = "url"
         private const val KEY_SECRET = "secret"
+        private const val KEY_LINE = "line"
         private const val KEY_STANDBY = "standby"
 
         private const val CHANNEL_STANDBY = "standby"
@@ -70,11 +71,15 @@ class AwaazService : Service() {
 
         fun isStandbyEnabled(context: Context) = prefs(context).getBoolean(KEY_STANDBY, false)
 
-        /** Gateway address and secret, mirrored from the app's settings. */
-        fun configure(context: Context, url: String, secret: String) {
+        /**
+         * Gateway address and secret, mirrored from the app's settings. In the
+         * demo build the secret is empty and [line] names this phone's demo line.
+         */
+        fun configure(context: Context, url: String, secret: String, line: String) {
             val p = prefs(context)
-            if (p.getString(KEY_URL, null) == url && p.getString(KEY_SECRET, null) == secret) return
-            p.edit().putString(KEY_URL, url).putString(KEY_SECRET, secret).apply()
+            if (p.getString(KEY_URL, null) == url && p.getString(KEY_SECRET, null) == secret &&
+                p.getString(KEY_LINE, "") == line) return
+            p.edit().putString(KEY_URL, url).putString(KEY_SECRET, secret).putString(KEY_LINE, line).apply()
             if (isStandbyEnabled(context) || callActive) send(context, ACTION_SYNC)
         }
 
@@ -122,7 +127,7 @@ class AwaazService : Service() {
     private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
 
     private var socket: WebSocket? = null
-    private var connectedConfig: Pair<String, String>? = null
+    private var connectedConfig: Triple<String, String, String>? = null
     // Bumped on every (re)connect so callbacks from an old socket are ignored
     private var generation = 0
     private var retryAttempt = 0
@@ -320,13 +325,15 @@ class AwaazService : Service() {
     private fun connect() {
         val p = prefs(this)
         val url = p.getString(KEY_URL, null)
-        val secret = p.getString(KEY_SECRET, null)
-        if (url.isNullOrEmpty() || secret.isNullOrEmpty()) {
+        val secret = p.getString(KEY_SECRET, null) ?: ""
+        val line = p.getString(KEY_LINE, null) ?: ""
+        // A demo phone needs no secret: its line code identifies it
+        if (url.isNullOrEmpty() || (secret.isEmpty() && line.isEmpty())) {
             disconnect()
             setStatus("Set the gateway secret in Awaaz settings")
             return
         }
-        val config = url to secret
+        val config = Triple(url, secret, line)
         if (socket != null && config == connectedConfig) return
         if (config != connectedConfig) authFailed = false
         if (authFailed) return
@@ -344,6 +351,7 @@ class AwaazService : Service() {
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val register = JSONObject().put("type", "REGISTER_MOBILE").put("authSecret", secret)
+                if (line.isNotEmpty()) register.put("line", line)
                 webSocket.send(register.toString())
             }
 

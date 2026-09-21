@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../core/demo_config.dart';
 import 'storage_service.dart';
 
 enum GatewayStatus { disconnected, connecting, connected, authFailed }
@@ -140,6 +141,7 @@ class WebSocketService with WidgetsBindingObserver {
       channel.sink.add(jsonEncode({
         'type': 'REGISTER_MOBILE',
         'authSecret': secret.trim(),
+        if (DemoConfig.line.isNotEmpty) 'line': DemoConfig.line,
       }));
       final msg = await reply;
       final ok = msg['type'] == 'REGISTERED_SUCCESS';
@@ -220,6 +222,8 @@ class WebSocketService with WidgetsBindingObserver {
     send({
       'type': 'REGISTER_MOBILE',
       'authSecret': _authSecret,
+      // Demo build: this install's own line instead of a secret
+      if (DemoConfig.line.isNotEmpty) 'line': DemoConfig.line,
     });
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import '../core/demo_config.dart';
 
 class BackgroundServiceStatus {
   final bool standby;
@@ -21,9 +22,10 @@ class BackgroundServiceStatus {
 class BackgroundService {
   static const MethodChannel _channel = MethodChannel('awaaz/service');
 
-  /// Mirrors the gateway address and secret for the service's own connection.
+  /// Mirrors the gateway address and secret (and, in the demo build, this
+  /// install's line) for the service's own connection.
   static Future<void> configure({required String url, required String secret}) =>
-      _call('configure', {'url': url, 'secret': secret});
+      _call('configure', {'url': url, 'secret': secret, 'line': DemoConfig.line});
 
   static Future<void> setStandby(bool enabled) => _call('setStandby', {'enabled': enabled});
 
