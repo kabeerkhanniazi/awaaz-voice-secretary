@@ -296,6 +296,7 @@ class WebSocketService with WidgetsBindingObserver {
   }
 
   void send(Map<String, dynamic> data) {
+    debugSent?.add(data);
     if (_channel != null && _isConnected) {
       _channel!.sink.add(jsonEncode(data));
     } else {
@@ -306,6 +307,10 @@ class WebSocketService with WidgetsBindingObserver {
   /// Delivers a gateway message as if it had arrived over the socket.
   @visibleForTesting
   void debugReceive(Map<String, dynamic> message) => _messageController.add(message);
+
+  /// Tests set this to see what the app sends to the gateway.
+  @visibleForTesting
+  List<Map<String, dynamic>>? debugSent;
 
   void sendBinary(Uint8List bytes) {
     if (_channel != null && _isConnected) _channel!.sink.add(bytes);

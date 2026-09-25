@@ -4,9 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
 import '../core/constants/relationship_constants.dart';
+import '../core/contact_actions.dart';
 import '../models/contact_model.dart';
 import '../providers/contacts_provider.dart';
+import '../providers/storage_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/reach_out.dart';
 
 /// People the secretary should recognise. The relationship tells her how to
 /// treat them (family and friends informally, business formally).
@@ -56,7 +59,16 @@ class _ContactsTabState extends ConsumerState<ContactsTab> {
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 20),
                   leading: InitialAvatar(name: contact.name),
-                  title: Text(contact.name),
+                  title: Row(
+                    children: [
+                      Flexible(child: Text(contact.name, overflow: TextOverflow.ellipsis)),
+                      // Has a personal link: their calls through it are verified
+                      if (contact.linkToken != null) ...[
+                        const SizedBox(width: 6),
+                        Icon(Icons.verified_outlined, size: 16, color: Theme.of(context).colorScheme.primary),
+                      ],
+                    ],
+                  ),
                   subtitle: Text(
                     [
                       contact.relationship.displayName,
@@ -66,6 +78,7 @@ class _ContactsTabState extends ConsumerState<ContactsTab> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  trailing: ReachOutButtons(number: contact.phoneNumber, dense: true),
                   onTap: () => _edit(context, contact),
                 );
               },
@@ -138,14 +151,29 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
   void _save() {
     final name = _name.text.trim();
     if (name.isEmpty) return;
-    ref.read(contactsProvider.notifier).upsertContact(ContactModel(
-      id: widget.contact?.id ?? const Uuid().v4(),
-      name: name,
-      phoneNumber: _phone.text.trim(),
-      relationship: _relationship,
-      company: _company.text.trim().isEmpty ? null : _company.text.trim(),
-      customNotes: widget.contact?.customNotes,
-    ));
+    final company = _company.text.trim().isEmpty ? null : _company.text.trim();
+    final existing = widget.contact == null ? null : ref.read(contactsProvider.notifier).byId(widget.contact!.id);
+    // Editing keeps the personal link and ring settings
+    ref.read(contactsProvider.notifier).upsertContact(existing != null
+        ? ContactModel(
+            id: existing.id,
+            name: name,
+            phoneNumber: _phone.text.trim(),
+            relationship: _relationship,
+            company: company,
+            customNotes: existing.customNotes,
+            linkToken: existing.linkToken,
+            linkDevices: existing.linkDevices,
+            alwaysRing: existing.alwaysRing,
+            neverRing: existing.neverRing,
+          )
+        : ContactModel(
+            id: const Uuid().v4(),
+            name: name,
+            phoneNumber: _phone.text.trim(),
+            relationship: _relationship,
+            company: company,
+          ));
     Navigator.pop(context);
   }
 
@@ -201,6 +229,7 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
                     ),
                 ],
               ),
+              if (editing) _PersonalLinkSection(contactId: widget.contact!.id),
               const SizedBox(height: 20),
               Row(
                 children: [
@@ -218,6 +247,103 @@ class _ContactSheetState extends ConsumerState<_ContactSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A contact's own call link. Calling through it is the only thing that
+/// verifies who a caller is, so "always ring" and "never ring" depend on it.
+class _PersonalLinkSection extends ConsumerWidget {
+  final String contactId;
+
+  const _PersonalLinkSection({required this.contactId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final contact = ref.watch(contactsProvider.select((list) => list.where((c) => c.id == contactId).firstOrNull));
+    if (contact == null) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final storage = ref.read(storageServiceProvider);
+    final notifier = ref.read(contactsProvider.notifier);
+    final hasLink = contact.linkToken != null;
+
+    Future<void> send(String token) {
+      final link = ContactActions.personalLink(storage.getGatewayUrl(), token);
+      return ContactActions.whatsApp(
+        number: contact.phoneNumber,
+        text: ContactActions.inviteText(contactName: contact.name, link: link, ownerName: storage.getMasterName()),
+        countryCode: storage.getCountryCode(),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 20),
+        const Text('Personal link', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text(
+          hasLink
+              ? "When ${contact.name.split(' ').first} calls through their link, you'll see them as verified."
+              : 'Send them their own link to call you through, so your secretary knows it is really them.',
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            FilledButton.tonalIcon(
+              icon: const Icon(Icons.chat_outlined, size: 18),
+              label: Text(hasLink ? 'Send again on WhatsApp' : 'Send on WhatsApp'),
+              onPressed: () => send(notifier.ensureLinkToken(contact.id)),
+            ),
+            if (hasLink)
+              TextButton(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Revoke this link?'),
+                      content: const Text('The old link stops identifying them. You can send them a new one straight away.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                        TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Revoke')),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    final token = notifier.revokeLink(contact.id);
+                    if (context.mounted) {
+                      showMessage(context, 'Old link revoked',
+                          action: SnackBarAction(label: 'Send new', onPressed: () => send(token)));
+                    }
+                  }
+                },
+                child: const Text('Revoke link'),
+              ),
+          ],
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Always ring'),
+          subtitle: const Text("Even when you're busy or on do not disturb"),
+          value: contact.alwaysRing,
+          onChanged: hasLink ? (v) => notifier.setRinging(contact.id, alwaysRing: v) : null,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Never ring'),
+          subtitle: const Text('Your secretary takes a message instead'),
+          value: contact.neverRing,
+          onChanged: hasLink ? (v) => notifier.setRinging(contact.id, neverRing: v) : null,
+        ),
+        if (!hasLink)
+          Text(
+            'These only apply to calls through their personal link, so nobody can switch them on by giving a name.',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+          ),
+      ],
     );
   }
 }

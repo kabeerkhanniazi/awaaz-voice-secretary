@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../core/contact_actions.dart';
 import '../core/demo_config.dart';
 import '../core/theme/app_theme.dart';
-import '../models/scenario_profile.dart';
-import '../providers/call_provider.dart';
+import '../models/availability.dart';
+import '../providers/owner_provider.dart';
 import '../providers/storage_provider.dart';
 import '../services/background_service.dart';
 import '../services/websocket_service.dart';
@@ -59,6 +60,9 @@ class _SettingsTabState extends ConsumerState<SettingsTab> with WidgetsBindingOb
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
+          const SectionHeader('Availability'),
+          const _AvailabilityTile(),
+
           const SectionHeader('Connection'),
           const _ConnectionStatus(),
           const DemoLineCard(),
@@ -140,33 +144,66 @@ class _SettingsTabState extends ConsumerState<SettingsTab> with WidgetsBindingOb
             },
           ),
 
-          const SectionHeader('Your call page'),
+          const SectionHeader('Your call link'),
+          ListTile(
+            contentPadding: const EdgeInsets.only(left: 20, right: 8),
+            title: Text(ContactActions.callPage(gatewayUrl)),
+            subtitle: const Text('Anyone can call you here. Callers are not verified: send people you know their own link from Contacts.'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Copy link',
+                  icon: const Icon(Icons.copy, size: 20),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: ContactActions.callPage(gatewayUrl)));
+                    showMessage(context, 'Link copied');
+                  },
+                ),
+                IconButton(
+                  tooltip: 'Share on WhatsApp',
+                  icon: const Icon(Icons.share_outlined, size: 20),
+                  onPressed: () => ContactActions.whatsApp(
+                    text: ContactActions.publicShareText(link: ContactActions.callPage(gatewayUrl), ownerName: storage.getMasterName()),
+                    countryCode: storage.getCountryCode(),
+                  ),
+                ),
+              ],
+            ),
+          ),
           ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-            title: Text(_callPageUrl(gatewayUrl)),
-            subtitle: const Text('Anyone can call you from this page. Tap to copy.'),
-            trailing: const Icon(Icons.copy, size: 18),
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: _callPageUrl(gatewayUrl)));
-              showMessage(context, 'Link copied');
-            },
+            title: const Text('Your name'),
+            subtitle: Text('${storage.getMasterName()} · used in the messages you send with your link'),
+            onTap: () => _editText(
+              title: 'Your name',
+              initial: storage.getMasterName(),
+              hint: 'Kabeer',
+              onSave: (value) {
+                if (value.trim().isNotEmpty) storage.setMasterName(value.trim());
+              },
+            ),
+          ),
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+            title: const Text('Country code'),
+            subtitle: Text('+${storage.getCountryCode()} · for WhatsApp, when a number starts with 0'),
+            onTap: () => _editText(
+              title: 'Country code',
+              initial: storage.getCountryCode(),
+              hint: '92',
+              onSave: (value) {
+                if (value.replaceAll(RegExp(r'\D'), '').isNotEmpty) storage.setCountryCode(value);
+              },
+            ),
           ),
 
-          const SectionHeader('Developer'),
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-            title: const Text('Simulate a call'),
-            subtitle: const Text('Try the call screen with a made-up caller. Nothing is sent to anyone.'),
-            onTap: _simulate,
-          ),
+          const SectionHeader('Blocked callers'),
+          const _BlockedCallersTile(),
         ],
       ),
     );
   }
-
-  static String _callPageUrl(String gatewayUrl) => gatewayUrl
-      .replaceFirst(RegExp(r'^wss://'), 'https://')
-      .replaceFirst(RegExp(r'^ws://'), 'http://');
 
   Future<void> _setStandby(bool enabled) async {
     if (enabled) {
@@ -212,29 +249,6 @@ class _SettingsTabState extends ConsumerState<SettingsTab> with WidgetsBindingOb
         onSave(value);
         setState(() {});
       }),
-    );
-  }
-
-  void _simulate() {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            for (final scenario in ScenarioProfile.presets)
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-                title: Text(scenario.callerName),
-                subtitle: Text(scenario.dialogueIntent, maxLines: 1, overflow: TextOverflow.ellipsis),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  ref.read(callProvider.notifier).simulateCall(scenario);
-                },
-              ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -357,6 +371,135 @@ class _TextSheetState extends State<_TextSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Available, busy for a while, or do not disturb. When away, the secretary
+/// takes messages straight away and tells callers when you'll be free; only
+/// verified "always ring" contacts still ring.
+class _AvailabilityTile extends ConsumerWidget {
+  const _AvailabilityTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final availability = ref.watch(ownerProvider.select((o) => o.availability));
+    final now = DateTime.now();
+    final away = availability.isAwayAt(now);
+    final status = StatusColors.of(context);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      leading: Icon(away ? Icons.do_not_disturb_on_outlined : Icons.check_circle_outline,
+          color: away ? status.warning : status.live),
+      title: Text(availability.describe(now)),
+      subtitle: Text(away
+          ? 'Your secretary takes messages. Only "always ring" contacts get through.'
+          : 'Calls ring as normal.'),
+      onTap: () => showAvailabilitySheet(context, ref),
+    );
+  }
+}
+
+/// Also opened from the Calls tab.
+void showAvailabilitySheet(BuildContext context, WidgetRef ref) {
+  final note = TextEditingController(text: ref.read(ownerProvider).availability.note ?? '');
+  void set(BuildContext sheetContext, AvailabilityMode mode, [Duration? forHowLong]) {
+    final text = note.text.trim();
+    ref.read(ownerProvider.notifier).setAvailability(Availability(
+      mode: mode,
+      until: forHowLong == null ? null : DateTime.now().add(forHowLong),
+      note: mode == AvailabilityMode.available || text.isEmpty ? null : text,
+    ));
+    Navigator.pop(sheetContext);
+  }
+
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (sheetContext) => Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: TextField(
+                controller: note,
+                decoration: const InputDecoration(labelText: 'Note for callers (optional)', hintText: 'in a meeting'),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Available'),
+              onTap: () => set(sheetContext, AvailabilityMode.available),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timelapse),
+              title: const Text('Busy for 30 minutes'),
+              onTap: () => set(sheetContext, AvailabilityMode.busy, const Duration(minutes: 30)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timelapse),
+              title: const Text('Busy for 1 hour'),
+              onTap: () => set(sheetContext, AvailabilityMode.busy, const Duration(hours: 1)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timelapse),
+              title: const Text('Busy for 2 hours'),
+              onTap: () => set(sheetContext, AvailabilityMode.busy, const Duration(hours: 2)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.do_not_disturb_on_outlined),
+              title: const Text('Do not disturb'),
+              subtitle: const Text('Until you switch it off'),
+              onTap: () => set(sheetContext, AvailabilityMode.dnd),
+            ),
+          ],
+        ),
+      ),
+    ),
+  ).whenComplete(note.dispose);
+}
+
+/// Browsers blocked as spam or as an impostor; the gateway refuses their calls.
+class _BlockedCallersTile extends ConsumerWidget {
+  const _BlockedCallersTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final blocked = ref.watch(ownerProvider.select((o) => o.blocked));
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      title: Text(blocked.isEmpty ? 'None' : '${blocked.length} blocked'),
+      subtitle: const Text('Marked as spam or impostor from a call. Their browser can no longer call you.'),
+      onTap: blocked.isEmpty
+          ? null
+          : () => showModalBottomSheet<void>(
+                context: context,
+                builder: (sheetContext) => Consumer(
+                  builder: (context, ref, _) {
+                    final entries = ref.watch(ownerProvider.select((o) => o.blocked)).entries.toList();
+                    return SafeArea(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final e in entries)
+                            ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                              title: Text((e.value['name'] as String?) ?? 'Unknown caller'),
+                              subtitle: Text(e.value['reason'] == 'impostor' ? 'Impostor' : 'Spam'),
+                              trailing: TextButton(
+                                onPressed: () => ref.read(ownerProvider.notifier).unblock(e.key),
+                                child: const Text('Unblock'),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
     );
   }
 }

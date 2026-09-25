@@ -55,6 +55,7 @@ class AwaazService : Service() {
         private const val KEY_URL = "url"
         private const val KEY_SECRET = "secret"
         private const val KEY_LINE = "line"
+        private const val KEY_OWNER_SETTINGS = "owner_settings"
         private const val KEY_STANDBY = "standby"
 
         private const val CHANNEL_STANDBY = "standby"
@@ -81,6 +82,15 @@ class AwaazService : Service() {
                 p.getString(KEY_LINE, "") == line) return
             p.edit().putString(KEY_URL, url).putString(KEY_SECRET, secret).putString(KEY_LINE, line).apply()
             if (isStandbyEnabled(context) || callActive) send(context, ACTION_SYNC)
+        }
+
+        /**
+         * Availability, personal links and blocked browsers, as the app last
+         * sent them to the gateway. Re-sent on every registration, so they
+         * survive a gateway restart while the app is closed.
+         */
+        fun setOwnerSettings(context: Context, json: String) {
+            prefs(context).edit().putString(KEY_OWNER_SETTINGS, json).apply()
         }
 
         fun setStandby(context: Context, enabled: Boolean) {
@@ -128,6 +138,8 @@ class AwaazService : Service() {
 
     private var socket: WebSocket? = null
     private var connectedConfig: Triple<String, String, String>? = null
+    // The personal-link name of the call now ringing, if it came through one
+    private var ringingVerifiedName: String? = null
     // Bumped on every (re)connect so callbacks from an old socket are ignored
     private var generation = 0
     private var retryAttempt = 0
@@ -397,6 +409,7 @@ class AwaazService : Service() {
             "REGISTERED_SUCCESS" -> {
                 retryAttempt = 0
                 setStatus("Ready for calls")
+                prefs(this).getString(KEY_OWNER_SETTINGS, null)?.let { socket?.send(it) }
             }
             "AUTH_FAILED" -> {
                 authFailed = true
@@ -407,10 +420,15 @@ class AwaazService : Service() {
                 // Replays after a reconnect must not ring again for the same call
                 if (!notifiedCallIds.add(callId)) return
                 while (notifiedCallIds.size > 50) notifiedCallIds.remove(notifiedCallIds.first())
+                // Kabeer is away, or it's a "never ring" contact: the secretary
+                // takes a message and the call shows up in the app afterwards
+                if (msg.has("quiet")) return
                 val details = msg.optJSONObject("details")
+                // Only a personal link proves who it is; otherwise show what they said
+                ringingVerifiedName = msg.optJSONObject("verified")?.optString("name")?.ifEmpty { null }
                 ring(
                     callId,
-                    details?.optString("name"),
+                    ringingVerifiedName ?: details?.optString("name"),
                     details?.optString("company"),
                     details?.optString("reason"),
                     alert = true,
@@ -420,7 +438,8 @@ class AwaazService : Service() {
                 val callId = msg.optString("callId")
                 // Put the caller's name on the ringing notification without re-alerting
                 if (callId == ringingCallId) {
-                    ring(callId, msg.optString("name"), msg.optString("company"), msg.optString("reason"), alert = false)
+                    val name = ringingVerifiedName ?: msg.optString("name").ifEmpty { null }?.let { "$it (not verified)" }
+                    ring(callId, name, msg.optString("company"), msg.optString("reason"), alert = false)
                 }
             }
             "CALLER_HUNG_UP" -> stopRinging(msg.optString("callId"))

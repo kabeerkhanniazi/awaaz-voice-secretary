@@ -29,6 +29,10 @@ class BackgroundService {
 
   static Future<void> setStandby(bool enabled) => _call('setStandby', {'enabled': enabled});
 
+  /// Owner settings as last sent to the gateway (see syncOwnerSettings), so
+  /// the service can re-send them when it registers on its own.
+  static Future<void> setOwnerSettings(String json) => _call('setOwnerSettings', {'json': json});
+
   static Future<void> startCall(String caller) => _call('startCall', {'caller': caller});
 
   static Future<void> stopCall() => _call('stopCall');

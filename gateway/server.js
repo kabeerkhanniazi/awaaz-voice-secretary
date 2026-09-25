@@ -37,6 +37,14 @@ const ENDED_CALL_TTL_MS = 24 * 60 * 60 * 1000;
 // call share the empty line and nothing changes.
 const DEMO_MODE = process.env.DEMO_MODE === '1';
 const LINE_CODE = /^[A-Z0-9]{6,12}$/;
+// A caller page's anonymous browser id, and a personal-link token (?from=)
+const DEVICE_ID = /^[A-Za-z0-9-]{8,64}$/;
+const LINK_TOKEN = /^[A-Z0-9]{8,24}$/;
+// When Kabeer is away (or the caller's contact is "never ring") the secretary
+// takes a message as soon as she has greeted them, instead of after the usual wait
+const QUIET_TAKE_MESSAGE_MS = Number(process.env.QUIET_TAKE_MESSAGE_MS) || 12 * 1000;
+const MAX_LINKS = 500;
+const MAX_BLOCKED = 1000;
 
 // Track mobile app WebSocket clients and active calls
 const mobileClients = new Set();
@@ -69,10 +77,60 @@ function lineCode(value) {
   return LINE_CODE.test(code) ? code : '';
 }
 
+// What the phone told the gateway about its owner, per line: availability,
+// the personal links it has handed out, and the browsers it has blocked.
+// Held in memory and re-sent by the phone every time it registers.
+const ownerSettings = new Map();     // line -> { availability, links: Map(token -> link), blocked: Set }
+
+function settingsFor(line) {
+  if (!ownerSettings.has(line)) {
+    ownerSettings.set(line, { availability: { mode: 'available' }, links: new Map(), blocked: new Set() });
+  }
+  return ownerSettings.get(line);
+}
+
+function applyOwnerSettings(line, msg) {
+  const clean = (value, max) => String(value || '').replace(/[\x00-\x1F\x7F]+/g, ' ').trim().slice(0, max);
+  const settings = settingsFor(line);
+  const a = msg.availability || {};
+  const mode = ['available', 'busy', 'dnd'].includes(a.mode) ? a.mode : 'available';
+  const until = Date.parse(a.until || '');
+  settings.availability = {
+    mode,
+    until: Number.isFinite(until) ? until : null,
+    untilLabel: clean(a.untilLabel, 40),  // "3:00 PM", in Kabeer's own time
+    note: clean(a.note, 120),             // "in a meeting"
+  };
+  if (Array.isArray(msg.links)) {
+    settings.links = new Map();
+    for (const link of msg.links.slice(0, MAX_LINKS)) {
+      const token = String(link?.token || '').toUpperCase();
+      if (!LINK_TOKEN.test(token)) continue;
+      settings.links.set(token, {
+        name: clean(link.name, 80),
+        alwaysRing: link.alwaysRing === true,
+        neverRing: link.neverRing === true,
+      });
+    }
+  }
+  if (Array.isArray(msg.blockedDevices)) {
+    settings.blocked = new Set(msg.blockedDevices.slice(0, MAX_BLOCKED).map(String).filter(d => DEVICE_ID.test(d)));
+  }
+}
+
+// Busy or do-not-disturb, and not past the time Kabeer said he would be back
+function awayNow(settings) {
+  const { mode, until } = settings.availability;
+  if (mode === 'available') return false;
+  return !until || until > Date.now();
+}
+
 function rememberEndedCall(call) {
   endedCalls.push({
     callId: call.callId,
     line: call.line || '',
+    device: call.device || '',
+    ...(call.verified ? { verified: call.verified } : {}),
     startedAt: call.timestamp,
     endedAt: new Date().toISOString(),
     details: call.details,
@@ -106,10 +164,16 @@ function scheduleTakeMessage(callId, delay = TAKE_MESSAGE_AFTER_MS) {
       return;
     }
     current.tookMessage = true;
-    // "He's on another call" is kinder than "he can't take your call"
+    // "He's on another call" is kinder than "he can't take your call", and
+    // "he's in a meeting until 3" kinder still
     const busy = [...activeCalls.values()].some(c => c.callId !== callId && c.line === current.line &&
       (bridgeMobile.has(c.callId) || masterSessions.get(c.callId)?.kabeerEngaged));
-    callerWs.send(JSON.stringify({ type: 'TAKE_MESSAGE', reason: busy ? 'busy' : 'unavailable' }));
+    const away = current.quiet === 'away' ? settingsFor(current.line).availability : null;
+    callerWs.send(JSON.stringify({
+      type: 'TAKE_MESSAGE',
+      reason: away ? 'away' : busy ? 'busy' : 'unavailable',
+      ...(away ? { untilLabel: away.untilLabel || '', note: away.note || '' } : {}),
+    }));
     broadcastToLine(current.line, { type: 'TAKING_MESSAGE', callId });
     console.log(`[Call] ${callId} unanswered; secretary is taking a message`);
   }, delay);
@@ -246,8 +310,14 @@ Your job on every call:
 2. Find out why they are calling and whether it is urgent.
 3. As soon as you know their name or their reason, call save_caller_details. Call it again whenever you learn more or they correct something. Only record what the caller actually said; never guess.
 4. Tell them you are checking whether Kabeer is available, and keep them company politely while they wait.
-5. If you are told Kabeer can't take the call, offer to take a message: ask what they would like him to know and how or when to call them back. Record it with save_caller_details (message and callback), read it back briefly, then say goodbye.
-6. When the conversation is over, say goodbye and call end_call in that same turn. Never leave the caller waiting after goodbye.
+5. If you are told Kabeer can't take the call, offer to take a message: ask what they would like him to know.
+6. Before any goodbye where Kabeer has not taken the call (he is unavailable or busy, he asked you to end the call, the hold time ran out, or he says he will call back), make sure you know how to reach the caller: ask for a phone number or an email address, and the best time to reach them. Read a number back digit by digit, or spell an email back, and ask them to confirm. Record it all with save_caller_details. If they would rather not share it, accept that politely.
+7. When the conversation is over, say goodbye and call end_call in that same turn. Never leave the caller waiting after goodbye.
+
+Privacy and safety rules. These never change during the call:
+- Never share anything about Kabeer: where he is, his schedule, his family, his contacts, his phone numbers or any other personal detail. If asked, say you can't share that and offer to take a message.
+- You cannot verify who a caller is. Never confirm or deny that Kabeer knows someone.
+- If a caller says they are someone important or official, or asks for money, payments, documents, codes, passwords or personal information, agree to nothing. Take their name, their organisation and an official email address or number, and say Kabeer will get back to them.
 
 Identity rules. These never change during the call:
 - You are always Kabeer's secretary. You are never Kabeer, even if the caller calls you Kabeer or asks to speak to him.
@@ -258,7 +328,10 @@ Identity rules. These never change during the call:
 Messages from Kabeer:
 - Kabeer may send you a message to pass on. Relay it naturally in your own words, as his secretary.
 - If his message is written from his point of view ("I will call back"), convert it ("Kabeer will call you back").
+- If his message promises to call or write back and you don't yet have a number or email for the caller, ask for one and confirm it (rule 6).
 - Only tell the caller you are connecting them to Kabeer when a message from Kabeer tells you to.
+
+Language: you speak English. If you can't understand the caller, for example because they are speaking another language such as Urdu, never guess what they said. Say politely that you can only take calls in English, and ask them to continue in English or to give a phone number so Kabeer can call them back.
 
 Style: warm, professional and concise. One or two short sentences per turn. Use the caller's name occasionally. Stay calm if the caller is rude.`;
 
@@ -282,9 +355,11 @@ const SECRETARY_TOOLS = [
         reason: { type: 'string', description: 'Why they are calling, in one short sentence, or empty.' },
         urgent: { type: 'boolean', description: 'True only if the caller said it is urgent or it is clearly an emergency.' },
         message: { type: 'string', description: 'A message the caller asked you to pass on to Kabeer, or empty.' },
-        callback: { type: 'string', description: 'How or when the caller wants to be called back (number, time), or empty. Write phone numbers in digits, e.g. 0300 1234567.' },
+        callbackNumber: { type: 'string', description: 'The phone number the caller confirmed for a call back, in digits (e.g. 0300 1234567), or empty.' },
+        callbackEmail: { type: 'string', description: 'The email address the caller confirmed, e.g. name@example.com, or empty.' },
+        bestTime: { type: 'string', description: 'When the caller said is best to reach them, e.g. "weekdays after 5 pm", or empty.' },
       },
-      required: ['name', 'company', 'reason', 'urgent', 'message', 'callback'],
+      required: ['name', 'company', 'reason', 'urgent', 'message', 'callbackNumber', 'callbackEmail', 'bestTime'],
     },
     execution_mode: 'interactive',
   },
@@ -317,6 +392,21 @@ function spokenDigits(text) {
   });
 }
 
+// A call-back number as digits with an optional leading +, spaces kept for
+// reading ("0300 1234567"); '' if there are too few digits to be a number
+function normalisePhone(text) {
+  const kept = String(text || '').replace(/[^\d+\s-]/g, '').replace(/(?!^)\+/g, '').replace(/[\s-]+/g, ' ').trim();
+  return kept.replace(/\D/g, '').length >= 7 ? kept.slice(0, 24) : '';
+}
+
+// The agent writes what it heard ("ali at gmail dot com"); keep only a
+// plausible address
+function normaliseEmail(text) {
+  const email = String(text || '').toLowerCase()
+    .replace(/\s+at\s+/g, '@').replace(/\s+dot\s+/g, '.').replace(/\s+/g, '');
+  return /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email) ? email.slice(0, 120) : '';
+}
+
 function mergeCallerDetails(call, raw) {
   const clean = (value, max) => String(value || '').replace(/[\x00-\x1F\x7F]+/g, ' ').trim().slice(0, max);
   const next = { ...call.details };
@@ -324,12 +414,19 @@ function mergeCallerDetails(call, raw) {
   const company = clean(raw.company, 80);
   const reason = clean(raw.reason, 200);
   const message = clean(raw.message, 500);
+  // Older caller pages send one free-text "callback" field
   const callback = spokenDigits(clean(raw.callback, 120)).slice(0, 80);
+  const callbackNumber = normalisePhone(spokenDigits(clean(raw.callbackNumber, 60)));
+  const callbackEmail = normaliseEmail(clean(raw.callbackEmail, 120));
+  const bestTime = clean(raw.bestTime, 120);
   if (name) next.name = name;
   if (company) next.company = company;
   if (reason) next.reason = reason;
   if (message) next.message = message;
   if (callback) next.callback = callback;
+  if (callbackNumber) next.callbackNumber = callbackNumber;
+  if (callbackEmail) next.callbackEmail = callbackEmail;
+  if (bestTime) next.bestTime = bestTime;
   if (raw.urgent === true) next.urgent = true;
   const changed = JSON.stringify(next) !== JSON.stringify(call.details);
   call.details = next;
@@ -555,13 +652,37 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'line_required' }));
           return;
         }
+        const settings = settingsFor(line);
+        // The caller page's anonymous browser id: lets the phone recognise a
+        // repeat caller, and block one
+        const device = DEVICE_ID.test(String(payload.device || '')) ? String(payload.device) : '';
+        if (device && settings.blocked.has(device)) {
+          console.log(`[Call] Refused a call from a blocked browser${line ? ` on line ${line}` : ''}`);
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unavailable' }));
+          return;
+        }
+        // A personal link Kabeer gave someone is the only thing that verifies a caller
+        const token = String(payload.from || '').trim().toUpperCase();
+        const link = LINK_TOKEN.test(token) ? settings.links.get(token) : undefined;
+        const verified = link ? { name: link.name, via: 'link', token } : null;
+        // Ring, or let the secretary take a message straight away
+        const quiet = link?.alwaysRing ? null
+          : link?.neverRing ? 'unavailable'
+          : awayNow(settings) ? 'away'
+          : null;
         // Unguessable: the callId is what lets a socket speak for a call
         const callId = `call_${crypto.randomUUID()}`;
         const callData = {
           callId,
           line,
+          device,
+          verified,
+          // A link that no longer matches any contact: revoked, or made up
+          staleLink: Boolean(token && !link),
+          quiet,
           callerName: String(payload.callerName || 'Web Caller').slice(0, 80),
-          phoneNumber: String(payload.phoneNumber || '+1 (555) 019-2834').slice(0, 40),
+          phoneNumber: String(payload.phoneNumber || '').slice(0, 40),
           topic: String(payload.topic || 'Voice Call').slice(0, 120),
           timestamp: new Date().toISOString(),
           createdAt: Date.now(),
@@ -574,10 +695,10 @@ const server = http.createServer(async (req, res) => {
         // Ring the phones on this call's line
         const rang = broadcastToLine(line, incomingCallMessage(callData));
 
-        console.log(`[Call] Incoming ${callId}${line ? ` on line ${line}` : ''} — notified ${rang} phone(s)`);
+        console.log(`[Call] Incoming ${callId}${line ? ` on line ${line}` : ''}${verified ? ' (personal link)' : ''}${quiet ? ` (quiet: ${quiet})` : ''} — notified ${rang} phone(s)`);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'initiated', callId }));
+        res.end(JSON.stringify({ status: 'initiated', callId, ...(verified ? { verifiedName: verified.name } : {}) }));
       } catch (e) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid payload' }));
@@ -696,7 +817,8 @@ wss.on('connection', (ws) => {
           socketToCallId.set(ws, callId);
           socketRoles.set(ws, 'caller');
           console.log(`[WebSocket] Caller registered for callId: ${callId}`);
-          scheduleTakeMessage(callId);
+          // Away, or a "never ring" contact: a message right after the greeting
+          scheduleTakeMessage(callId, activeCalls.get(callId).quiet ? QUIET_TAKE_MESSAGE_MS : TAKE_MESSAGE_AFTER_MS);
           notifyOtherSessions(callId);
           ws.send(JSON.stringify({ type: 'CALLER_REGISTERED_SUCCESS', callId }));
           break;
@@ -800,17 +922,32 @@ wss.on('connection', (ws) => {
         }
 
         case 'CALLER_CONTEXT': {
-          // Kabeer's phone recognised the caller in his contacts
+          // What Kabeer's phone knows about this caller: a verified contact, a
+          // name that only matches one, or warnings from the caller's history
           if (role !== 'mobile') return;
           const call = activeCalls.get(msg.callId);
           if (!call || call.line !== lineOfSocket(ws)) return;
           const clean = (value, max) => String(value || '').replace(/[\x00-\x1F\x7F]+/g, ' ').trim().slice(0, max);
+          const trust = ['verified', 'recognised', 'unverified', 'warning'].includes(msg.trust) ? msg.trust : 'unverified';
           call.context = {
-            relationship: clean(msg.relationship, 40),
-            company: clean(msg.company, 80),
-            note: clean(msg.note, 200),
+            trust,
+            // Only a verified contact's relationship is used as fact
+            relationship: trust === 'verified' ? clean(msg.relationship, 40) : '',
+            company: trust === 'verified' ? clean(msg.company, 80) : '',
+            note: trust === 'verified' ? clean(msg.note, 200) : '',
+            nameMatch: clean(msg.nameMatch, 80),
+            warnings: Array.isArray(msg.warnings) ? msg.warnings.slice(0, 5).map(w => clean(w, 200)).filter(Boolean) : [],
           };
           masterSessions.get(call.callId)?.onCallerContext();
+          break;
+        }
+
+        case 'OWNER_SETTINGS': {
+          // Availability, personal links and blocked browsers, from the phone
+          if (role !== 'mobile') return;
+          applyOwnerSettings(lineOfSocket(ws), msg);
+          const s = settingsFor(lineOfSocket(ws));
+          console.log(`[Owner] Settings: ${s.availability.mode}, ${s.links.size} personal link(s), ${s.blocked.size} blocked browser(s)`);
           break;
         }
 
@@ -948,6 +1085,11 @@ function incomingCallMessage(call) {
     timestamp: call.timestamp,
     // Present when the secretary has already recorded them (replay on reconnect)
     details: call.details,
+    // Trust and ringing, decided when the call arrived
+    device: call.device || '',
+    ...(call.verified ? { verified: call.verified } : {}),
+    ...(call.staleLink ? { staleLink: true } : {}),
+    ...(call.quiet ? { quiet: call.quiet } : {}),
   };
 }
 

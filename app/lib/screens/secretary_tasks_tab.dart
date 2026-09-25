@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../models/secretary_task_model.dart';
 import '../providers/dashboard_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/reach_out.dart';
 
 class SecretaryTasksTab extends ConsumerStatefulWidget {
   const SecretaryTasksTab({super.key});
@@ -134,6 +135,8 @@ class _TaskTile extends ConsumerWidget {
             TextSpan(text: details),
           ]),
         ),
+        // Call-back tasks: one tap to dial, WhatsApp or email them
+        secondary: task.isCompleted ? null : ReachOutButtons(number: task.phoneNumber, email: task.email, dense: true),
       ),
     );
   }

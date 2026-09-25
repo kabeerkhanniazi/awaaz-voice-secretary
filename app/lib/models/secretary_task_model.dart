@@ -21,6 +21,9 @@ class SecretaryTaskModel {
   final TaskPriority priority;
   final DateTime createdAt;
   final DateTime? dueDate;
+  // For "call back" tasks: how to reach them, so the task can dial or write
+  final String? phoneNumber;
+  final String? email;
   bool isCompleted;
 
   SecretaryTaskModel({
@@ -31,6 +34,8 @@ class SecretaryTaskModel {
     required this.priority,
     required this.createdAt,
     this.dueDate,
+    this.phoneNumber,
+    this.email,
     this.isCompleted = false,
   });
 
@@ -43,6 +48,8 @@ class SecretaryTaskModel {
       'priority': priority.name,
       'createdAt': createdAt.toIso8601String(),
       'dueDate': dueDate?.toIso8601String(),
+      'phoneNumber': phoneNumber,
+      'email': email,
       'isCompleted': isCompleted,
     };
   }
@@ -59,6 +66,8 @@ class SecretaryTaskModel {
       ),
       createdAt: DateTime.parse(json['createdAt'] as String),
       dueDate: json['dueDate'] != null ? DateTime.parse(json['dueDate'] as String) : null,
+      phoneNumber: json['phoneNumber'] as String?,
+      email: json['email'] as String?,
       isCompleted: json['isCompleted'] as bool? ?? false,
     );
   }

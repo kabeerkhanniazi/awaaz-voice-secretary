@@ -1,7 +1,9 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import '../core/caller_trust.dart';
 import '../core/constants/relationship_constants.dart';
 import '../models/scenario_profile.dart';
 import '../models/call_record_model.dart';
@@ -11,6 +13,7 @@ import '../services/background_service.dart';
 import '../services/call_audio_service.dart';
 import '../services/websocket_service.dart';
 import 'contacts_provider.dart';
+import 'owner_provider.dart';
 import 'dashboard_provider.dart';
 import 'storage_provider.dart';
 
@@ -53,6 +56,18 @@ class CallState {
   // A message the caller left, and how to call them back (when Kabeer was unavailable)
   final String? callerMessage;
   final String? callerCallback;
+  // How to reach the caller, as they confirmed it to the secretary
+  final String? callbackNumber;
+  final String? callbackEmail;
+  final String? bestTime;
+  // Who the caller really is, as far as the phone can tell (see caller_trust.dart)
+  final CallerTrust trust;
+  final String? deviceId;     // the caller page's anonymous browser id
+  final String? linkToken;    // the personal link it came through, if any
+  final bool staleLink;       // a link that matches no current contact
+  // Set when the gateway didn't ring (Kabeer away, or a "never ring" contact):
+  // 'away' | 'unavailable'
+  final String? quiet;
 
   CallState({
     this.status = ActiveCallStatus.idle,
@@ -76,6 +91,14 @@ class CallState {
     this.urgent = false,
     this.callerMessage,
     this.callerCallback,
+    this.callbackNumber,
+    this.callbackEmail,
+    this.bestTime,
+    this.trust = const CallerTrust(),
+    this.deviceId,
+    this.linkToken,
+    this.staleLink = false,
+    this.quiet,
   }) : _legacyLiveTranscript = liveTranscript;
 
   /// True until the secretary has learned the caller's name.
@@ -116,6 +139,14 @@ class CallState {
     bool? urgent,
     String? callerMessage,
     String? callerCallback,
+    String? callbackNumber,
+    String? callbackEmail,
+    String? bestTime,
+    CallerTrust? trust,
+    String? deviceId,
+    String? linkToken,
+    bool? staleLink,
+    String? quiet,
   }) {
     return CallState(
       status: status ?? this.status,
@@ -139,6 +170,14 @@ class CallState {
       urgent: urgent ?? this.urgent,
       callerMessage: callerMessage ?? this.callerMessage,
       callerCallback: callerCallback ?? this.callerCallback,
+      callbackNumber: callbackNumber ?? this.callbackNumber,
+      callbackEmail: callbackEmail ?? this.callbackEmail,
+      bestTime: bestTime ?? this.bestTime,
+      trust: trust ?? this.trust,
+      deviceId: deviceId ?? this.deviceId,
+      linkToken: linkToken ?? this.linkToken,
+      staleLink: staleLink ?? this.staleLink,
+      quiet: quiet ?? this.quiet,
     );
   }
 }
@@ -160,12 +199,17 @@ class CallNotifier extends Notifier<CallState> {
   String? _voiceCallId;
   // Tasks Kabeer dictated during this call, saved when it ends
   final List<({String text, DateTime? due})> _voiceTasks = [];
-  // Name last sent to the gateway as CALLER_CONTEXT (one message per name)
-  String? _contextSentFor;
+  // The name the caller gave (a claim), and the last CALLER_CONTEXT sent
+  String? _claimedName;
+  String? _contextSignature;
 
   @override
   CallState build() {
     _initWebSocket();
+    // Keep the gateway's view of Kabeer current: availability, personal links
+    // and blocked browsers decide, per call, who is verified and whether to ring
+    ref.listen(contactsProvider, (_, _) => syncOwnerSettings());
+    ref.listen(ownerProvider, (_, _) => syncOwnerSettings());
     ref.onDispose(() {
       _wsService.disconnect();
       _wsSub?.cancel();
@@ -174,6 +218,15 @@ class CallNotifier extends Notifier<CallState> {
       _stopAudio();
     });
     return CallState();
+  }
+
+  /// Sends availability, personal links and blocked browsers to the gateway, and
+  /// hands the same to the background service so it can re-send them itself
+  /// if the gateway restarts while the app is closed.
+  void syncOwnerSettings() {
+    final message = ownerSettingsMessage(ref.read(ownerProvider), ref.read(contactsProvider), DateTime.now());
+    _wsService.send(message);
+    BackgroundService.setOwnerSettings(jsonEncode(message));
   }
 
   // Gateway events carry the callId they belong to; anything for another call
@@ -195,6 +248,10 @@ class CallNotifier extends Notifier<CallState> {
     _wsSub = _wsService.messageStream.listen((msg) {
       final type = msg['type'] as String?;
 
+      if (type == 'REGISTERED_SUCCESS') {
+        syncOwnerSettings();
+        return;
+      }
       if (type == 'INCOMING_CALL') {
         final callId = msg['callId'] as String?;
         if (callId == null) return;
@@ -303,12 +360,23 @@ class CallNotifier extends Notifier<CallState> {
   }
 
   /// "Call back Maria Lopez (0300 1234567): wants to confirm Friday's review".
-  static String? followUpFor({String? name, String? reason, String? message, String? callback}) {
+  static String? followUpFor({
+    String? name,
+    String? reason,
+    String? message,
+    String? callback,
+    String? number,
+    String? email,
+  }) {
     final what = message ?? reason;
-    if (what == null && callback == null) return null;
+    if (what == null && callback == null && number == null && email == null) return null;
     final who = name ?? 'the caller';
+    final gist = what != null ? ': $what' : '';
+    // A confirmed number or email makes the task something you can act on
+    if (number != null) return 'Call back $who ($number)$gist';
+    if (email != null) return 'Email $who ($email)$gist';
     final how = callback != null ? ' ($callback)' : '';
-    return 'Call back $who$how${what != null ? ': $what' : ''}';
+    return 'Call back $who$how$gist';
   }
 
   /// Calls that ended while this phone wasn't there to log them (app closed,
@@ -330,14 +398,28 @@ class CallNotifier extends Notifier<CallState> {
           return (value == null || value.isEmpty) ? null : value;
         }
 
-        final name = field('name');
         final started = DateTime.tryParse(raw['startedAt'] as String? ?? '');
         final ended = DateTime.tryParse(raw['endedAt'] as String? ?? '') ?? DateTime.now();
+        final verified = raw['verified'];
+        final device = raw['device'] as String?;
+        // Same rules as a live call: only a personal link verifies the name
+        final trust = assessCaller(
+          claimedName: field('name'),
+          linkToken: verified is Map ? verified['token'] as String? : null,
+          deviceId: device,
+          contacts: ref.read(contactsProvider),
+          history: ref.read(dashboardProvider).callLogs,
+        );
+        final name = trust.contact?.name ?? field('name');
+        final number = field('callbackNumber');
+        final email = field('callbackEmail');
         final followUp = followUpFor(
           name: name,
           reason: field('reason'),
           message: field('message'),
           callback: field('callback'),
+          number: number,
+          email: email,
         );
         final transcript = [
           for (final t in (raw['transcript'] as List? ?? const []))
@@ -348,10 +430,8 @@ class CallNotifier extends Notifier<CallState> {
         dashboard.addCallLog(CallRecordModel(
           id: callId,
           callerName: name ?? CallState.unknownCallerName,
-          phoneNumber: field('callback') ?? '',
-          relationship: name == null
-              ? RelationshipCategory.unknown
-              : ref.read(contactsProvider.notifier).resolveRelationship(name),
+          phoneNumber: number ?? '',
+          relationship: trust.contact?.relationship ?? RelationshipCategory.unknown,
           timestamp: ended.toLocal(),
           durationSeconds: started == null ? 1 : ended.difference(started).inSeconds.clamp(1, 36000),
           sentimentScore: 0,
@@ -361,6 +441,13 @@ class CallNotifier extends Notifier<CallState> {
           transcript: transcript,
           actionStatus: CallActionStatus.secretaryResolved,
           extractedActionItem: followUp,
+          callbackNumber: number,
+          callbackEmail: email,
+          bestTime: field('bestTime'),
+          callerMessage: field('message'),
+          deviceId: (device ?? '').isEmpty ? null : device,
+          trust: trust.level.name,
+          trustNote: trust.note,
         ));
         if (followUp != null) {
           dashboard.addTask(SecretaryTaskModel(
@@ -370,6 +457,8 @@ class CallNotifier extends Notifier<CallState> {
             actionItem: followUp,
             priority: details['urgent'] == true ? TaskPriority.high : TaskPriority.medium,
             createdAt: ended.toLocal(),
+            phoneNumber: number,
+            email: email,
           ));
         }
       }
@@ -414,32 +503,17 @@ class CallNotifier extends Notifier<CallState> {
       return (value == null || value.isEmpty) ? null : value;
     }
 
+    // What the caller says their name is: a claim, checked in _refreshTrust
     final name = field('name');
-    final company = field('company');
+    if (name != null) _claimedName = name;
     final reason = field('reason');
-    final contact = name == null ? null : ref.read(contactsProvider.notifier).findContact(name);
-    final relationship = name == null
-        ? scenario.relationship
-        : (contact?.relationship ?? RelationshipCategory.unknown);
-
-    // Tell Kabeer's secretary session who this is to him, once per name
-    if (contact != null && state.isRealCall && state.currentCallId != null && _contextSentFor != name) {
-      _contextSentFor = name;
-      _wsService.send({
-        'type': 'CALLER_CONTEXT',
-        'callId': state.currentCallId,
-        'relationship': contact.relationship.displayName,
-        'company': ?contact.company,
-        'note': ?contact.customNotes,
-      });
-    }
 
     state = state.copyWith(
       activeScenario: ScenarioProfile(
         title: scenario.title,
-        callerName: name ?? scenario.callerName,
+        callerName: scenario.callerName,
         phoneNumber: scenario.phoneNumber,
-        relationship: relationship,
+        relationship: scenario.relationship,
         dialogOpening: scenario.dialogOpening,
         dialogueIntent: reason ?? scenario.dialogueIntent,
         sentimentScore: scenario.sentimentScore,
@@ -447,12 +521,58 @@ class CallNotifier extends Notifier<CallState> {
         extractedActionItem: scenario.extractedActionItem,
         recommendedResponse: scenario.recommendedResponse,
       ),
-      callerCompany: company,
+      callerCompany: field('company'),
       callerReason: reason,
       urgent: details['urgent'] == true ? true : null,
       callerMessage: field('message'),
       callerCallback: field('callback'),
+      callbackNumber: field('callbackNumber'),
+      callbackEmail: field('callbackEmail'),
+      bestTime: field('bestTime'),
     );
+    _refreshTrust();
+  }
+
+  /// Works out who this caller really is (see caller_trust.dart), shows it, and
+  /// tells Kabeer's secretary so she briefs him the same way. Only a personal
+  /// link verifies anyone; a claimed name never borrows a contact's relationship.
+  void _refreshTrust() {
+    final scenario = state.activeScenario;
+    if (!state.isRealCall || scenario == null) return;
+    final trust = assessCaller(
+      claimedName: _claimedName,
+      linkToken: state.linkToken,
+      staleLink: state.staleLink,
+      deviceId: state.deviceId,
+      contacts: ref.read(contactsProvider),
+      history: ref.read(dashboardProvider).callLogs,
+    );
+    final contact = trust.contact;
+    state = state.copyWith(
+      trust: trust,
+      activeScenario: ScenarioProfile(
+        title: scenario.title,
+        // A verified caller is shown by the name Kabeer saved; anyone else by
+        // the name they gave
+        callerName: contact?.name ?? _claimedName ?? scenario.callerName,
+        phoneNumber: scenario.phoneNumber,
+        relationship: contact?.relationship ?? RelationshipCategory.unknown,
+        dialogOpening: scenario.dialogOpening,
+        dialogueIntent: scenario.dialogueIntent,
+        sentimentScore: scenario.sentimentScore,
+        lemurSummary: scenario.lemurSummary,
+        extractedActionItem: scenario.extractedActionItem,
+        recommendedResponse: scenario.recommendedResponse,
+      ),
+    );
+    final callId = state.currentCallId;
+    if (callId == null) return;
+    final message = trust.contextMessage(callId);
+    final signature = jsonEncode(message);
+    if (signature != _contextSignature) {
+      _contextSignature = signature;
+      _wsService.send(message);
+    }
   }
 
   void _onVoiceTranscript(String? speaker, String text) {
@@ -505,15 +625,14 @@ class CallNotifier extends Notifier<CallState> {
     final callerName = msg['callerName'] as String? ?? CallState.unknownCallerName;
     final phoneNumber = msg['phoneNumber'] as String? ?? '';
     final topic = msg['topic'] as String? ?? 'Inbound Voice Call';
-
-    // C7: Caller identity resolved from envelope and contacts, never from regex
-    final relationship = ref.read(contactsProvider.notifier).resolveRelationship(phoneNumber);
+    final verified = msg['verified'];
 
     final incomingScenario = ScenarioProfile(
       title: 'Inbound call',
       callerName: callerName,
       phoneNumber: phoneNumber,
-      relationship: relationship,
+      // Worked out in _refreshTrust, from a personal link and nothing else
+      relationship: RelationshipCategory.unknown,
       dialogOpening: 'Connecting to AI secretary...',
       dialogueIntent: topic,
       sentimentScore: 0.0,
@@ -522,7 +641,15 @@ class CallNotifier extends Notifier<CallState> {
       recommendedResponse: 'Screening incoming voice call.',
     );
 
-    _handleIncomingRealCall(incomingScenario, callId);
+    _handleIncomingRealCall(
+      incomingScenario,
+      callId,
+      deviceId: msg['device'] as String?,
+      linkToken: verified is Map ? verified['token'] as String? : null,
+      staleLink: msg['staleLink'] == true,
+      quiet: msg['quiet'] as String?,
+    );
+    _refreshTrust();
     // A replayed call may already carry what the secretary learned
     final details = msg['details'];
     if (details is Map<String, dynamic> && details.isNotEmpty) _applyCallerDetails(details);
@@ -559,10 +686,18 @@ class CallNotifier extends Notifier<CallState> {
     ]);
   }
 
-  void _handleIncomingRealCall(ScenarioProfile scenario, String callId) {
+  void _handleIncomingRealCall(
+    ScenarioProfile scenario,
+    String callId, {
+    String? deviceId,
+    String? linkToken,
+    bool staleLink = false,
+    String? quiet,
+  }) {
     _cleanup();
     _isCallTerminated = false;
-    _contextSentFor = null;
+    _claimedName = null;
+    _contextSignature = null;
     _voiceTasks.clear();
     // The call is on screen now; stop the background ring if there was one
     BackgroundService.cancelIncomingAlert();
@@ -572,27 +707,15 @@ class CallNotifier extends Notifier<CallState> {
       startTime: DateTime.now(),
       currentCallId: callId,
       isRealCall: true,
+      deviceId: (deviceId ?? '').isEmpty ? null : deviceId,
+      linkToken: linkToken,
+      staleLink: staleLink,
+      quiet: quiet,
     );
-    // Off in settings: Kabeer starts it from the call screen instead
-    if (ref.read(storageServiceProvider).getAutoVoice()) startVoiceSession();
-  }
-
-  /// Trigger an incoming call simulation manually
-  void simulateCall(ScenarioProfile scenario) {
-    _cleanup();
-    _isCallTerminated = false;
-    final callId = 'sim_${const Uuid().v4()}';
-    state = CallState(
-      status: ActiveCallStatus.secretaryScreening,
-      activeScenario: scenario,
-      startTime: DateTime.now(),
-      transcriptEntries: [
-        TranscriptEntry(speaker: 'Caller', text: scenario.dialogOpening, timeOffset: '0:00'),
-      ],
-      currentCallId: callId,
-      isRealCall: false,
-      callerReason: scenario.dialogueIntent,
-    );
+    // Quiet calls (Kabeer away, or a "never ring" contact) are the secretary's:
+    // no voice session unless he opens one himself. Off in settings: he always
+    // starts it from the call screen.
+    if (quiet == null && ref.read(storageServiceProvider).getAutoVoice()) startVoiceSession();
   }
 
   /// Master Directive 1: Patch In. The secretary tells the caller she is
@@ -739,13 +862,34 @@ class CallNotifier extends Notifier<CallState> {
 
       if (remaining <= 0) {
         timer.cancel();
-        if (state.status == ActiveCallStatus.holding) {
-          acceptAndPatch();
-        }
+        if (state.status == ActiveCallStatus.holding) _holdTimeUp();
       } else if (remaining != state.holdTimerSeconds) {
         state = state.copyWith(holdTimerSeconds: remaining);
       }
     });
+  }
+
+  /// The hold ran out. Connecting now could put the caller through to a phone
+  /// nobody is holding, so the secretary checks in with the caller instead
+  /// (keep waiting, or leave a message) and the phone asks for Kabeer's attention.
+  void _holdTimeUp() {
+    _directiveVersion++;
+    if (state.isRealCall && state.currentCallId != null) {
+      _wsService.sendMasterDirective(
+        callId: state.currentCallId!,
+        action: 'checkIn',
+        directiveVersion: _directiveVersion,
+      );
+    }
+    state = state.copyWith(
+      status: ActiveCallStatus.secretaryScreening,
+      holdTimerSeconds: 0,
+      activeDirective: 'Hold time is up: your secretary is checking in with the caller',
+      directiveStatus: 'sending',
+      directiveVersion: _directiveVersion,
+    );
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.alert);
   }
 
   /// Master Directive 3: Custom voice/text instruction to Secretary (B3 versioned)
@@ -779,7 +923,17 @@ class CallNotifier extends Notifier<CallState> {
 
   /// Ends the call and files it as spam: the secretary still says a polite
   /// goodbye, and no follow-up task is created.
-  void markSpamAndEnd() {
+  void markSpamAndEnd() => _blockAndEnd('spam', 'Marked as spam');
+
+  /// Someone pretending to be someone else: end politely, block the browser,
+  /// and keep the false claim on record.
+  void markImpostorAndEnd() => _blockAndEnd('impostor', 'Marked as impostor');
+
+  void _blockAndEnd(String reason, String label) {
+    final device = state.deviceId;
+    if (state.isRealCall && device != null) {
+      ref.read(ownerProvider.notifier).block(device, reason: reason, name: _claimedName);
+    }
     _directiveVersion++;
     // Simulated calls exist only on the phone; the gateway doesn't know them
     if (state.isRealCall && state.currentCallId != null) {
@@ -792,7 +946,7 @@ class CallNotifier extends Notifier<CallState> {
     _voiceTasks.clear();
     state = state.copyWith(
       status: ActiveCallStatus.callEnded,
-      activeDirective: 'Marked as spam',
+      activeDirective: label,
       directiveStatus: 'sending',
       directiveVersion: _directiveVersion,
     );
@@ -870,13 +1024,16 @@ class CallNotifier extends Notifier<CallState> {
       }
       if (dictatedTasks.isNotEmpty) {
         actionItem = dictatedTasks.map((t) => t.text).join('; ');
-      } else if (state.callerMessage != null || state.callerCallback != null) {
-        // The caller left a message: calling them back is the follow-up
+      } else if (state.callerMessage != null || state.callerCallback != null ||
+          state.callbackNumber != null || state.callbackEmail != null) {
+        // The caller left a message or a way to reach them: that's the follow-up
         actionItem = followUpFor(
               name: state.callerUnknown ? null : scenario.callerName,
               reason: state.callerReason,
               message: state.callerMessage,
               callback: state.callerCallback,
+              number: state.callbackNumber,
+              email: state.callbackEmail,
             ) ??
             actionItem;
       }
@@ -894,6 +1051,13 @@ class CallNotifier extends Notifier<CallState> {
         transcript: callTranscripts,
         actionStatus: actionStatus,
         extractedActionItem: actionItem,
+        callbackNumber: state.callbackNumber,
+        callbackEmail: state.callbackEmail,
+        bestTime: state.bestTime,
+        callerMessage: state.callerMessage,
+        deviceId: state.deviceId,
+        trust: state.isRealCall ? state.trust.level.name : null,
+        trustNote: state.isRealCall ? state.trust.note : null,
       );
 
       // Replaces a copy imported as a missed call while this one was wrapping up
@@ -912,6 +1076,8 @@ class CallNotifier extends Notifier<CallState> {
             priority: TaskPriority.high,
             createdAt: DateTime.now(),
             dueDate: task.due,
+            phoneNumber: state.callbackNumber,
+            email: state.callbackEmail,
           ));
         }
       } else if (actionItem.isNotEmpty && actionStatus != CallActionStatus.declinedSpam) {
@@ -922,8 +1088,16 @@ class CallNotifier extends Notifier<CallState> {
           actionItem: actionItem,
           priority: sentiment < -0.3 ? TaskPriority.high : TaskPriority.medium,
           createdAt: DateTime.now(),
+          phoneNumber: state.callbackNumber,
+          email: state.callbackEmail,
         );
         ref.read(dashboardProvider.notifier).addTask(task);
+      }
+
+      // A verified caller's browser, remembered to notice a new one next time
+      final linked = state.trust.contact;
+      if (linked != null && state.deviceId != null) {
+        ref.read(contactsProvider.notifier).recordLinkDevice(linked.id, state.deviceId!);
       }
 
       // Logged here, so the gateway won't offer it later as a missed call
@@ -933,6 +1107,7 @@ class CallNotifier extends Notifier<CallState> {
     // Delay reset slightly to let animations complete
     final endedCallId = state.currentCallId;
     Future.delayed(const Duration(seconds: 2), () {
+      if (!ref.mounted) return;
       // Another call may already be on screen
       if (state.currentCallId != endedCallId) return;
       _cleanup();

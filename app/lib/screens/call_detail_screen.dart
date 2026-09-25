@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/call_record_model.dart';
 import '../models/secretary_task_model.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/owner_provider.dart';
 import '../widgets/common.dart';
+import '../widgets/reach_out.dart';
 import 'call_records_tab.dart';
 
 class CallDetailScreen extends ConsumerWidget {
@@ -21,10 +23,30 @@ class CallDetailScreen extends ConsumerWidget {
     final tasks = dashboard.tasksForCall(call.id);
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
+    final device = call.deviceId;
+    final blocked = device != null && ref.watch(ownerProvider.select((o) => o.blocked.containsKey(device)));
+    final hasReach = call.callbackNumber != null || call.callbackEmail != null ||
+        call.bestTime != null || call.callerMessage != null;
 
     return Scaffold(
       appBar: AppBar(
         actions: [
+          // Block the browser this call came from (web callers have no number)
+          if (device != null)
+            IconButton(
+              tooltip: blocked ? 'Unblock this caller' : 'Block this caller',
+              icon: Icon(blocked ? Icons.block : Icons.block_outlined, color: blocked ? scheme.error : null),
+              onPressed: () {
+                final owner = ref.read(ownerProvider.notifier);
+                if (blocked) {
+                  owner.unblock(device);
+                  showMessage(context, 'Unblocked');
+                } else {
+                  owner.block(device, reason: 'spam', name: call.callerName);
+                  showMessage(context, 'Blocked: calls from that browser will be refused');
+                }
+              },
+            ),
           IconButton(
             tooltip: 'Delete call',
             icon: const Icon(Icons.delete_outline),
@@ -61,6 +83,37 @@ class CallDetailScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
             child: Text(call.actionStatus.label, style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
+          if (call.trust != null) _RecordTrust(trust: call.trust!, note: call.trustNote),
+
+          if (hasReach) ...[
+            const SectionHeader('How to reach them'),
+            if (call.callbackNumber != null)
+              ListTile(
+                contentPadding: const EdgeInsets.only(left: 20, right: 8),
+                leading: const Icon(Icons.phone_outlined),
+                title: Text(call.callbackNumber!),
+                trailing: ReachOutButtons(number: call.callbackNumber),
+              ),
+            if (call.callbackEmail != null)
+              ListTile(
+                contentPadding: const EdgeInsets.only(left: 20, right: 8),
+                leading: const Icon(Icons.alternate_email),
+                title: Text(call.callbackEmail!),
+                trailing: ReachOutButtons(email: call.callbackEmail),
+              ),
+            if (call.bestTime != null)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                leading: const Icon(Icons.schedule),
+                title: Text('Best time: ${call.bestTime!}'),
+              ),
+            if (call.callerMessage != null)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+                leading: const Icon(Icons.notes),
+                title: Text(call.callerMessage!),
+              ),
+          ],
 
           const SectionHeader('Summary'),
           Padding(
@@ -104,6 +157,29 @@ class CallDetailScreen extends ConsumerWidget {
   }
 }
 
+/// The trust verdict as it stood when the call ended.
+class _RecordTrust extends StatelessWidget {
+  final String trust;
+  final String? note;
+
+  const _RecordTrust({required this.trust, this.note});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (label, color) = switch (trust) {
+      'verified' => ('Verified by their personal link', scheme.primary),
+      'recognised' => ('Not verified · called before from this browser', scheme.onSurfaceVariant),
+      'warning' => ('Warning', scheme.error),
+      _ => ('Not verified: the name is what the caller said', scheme.onSurfaceVariant),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+      child: Text(note == null ? label : '$label · $note', style: TextStyle(fontSize: 13, color: color)),
+    );
+  }
+}
+
 class _TaskRow extends ConsumerWidget {
   final SecretaryTaskModel task;
 
@@ -120,6 +196,7 @@ class _TaskRow extends ConsumerWidget {
         task.actionItem,
         style: TextStyle(decoration: task.isCompleted ? TextDecoration.lineThrough : null),
       ),
+      secondary: ReachOutButtons(number: task.phoneNumber, email: task.email, dense: true),
     );
   }
 }

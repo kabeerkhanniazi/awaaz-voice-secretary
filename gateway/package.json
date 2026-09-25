@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/pcm_processor.test.js && node test/concurrent_routing.test.js && node test/demo_lines.test.js"
+    "test": "node test/pcm_processor.test.js && node test/concurrent_routing.test.js && node test/demo_lines.test.js && node test/owner_settings.test.js"
   },
   "license": "MIT",
   "dependencies": {

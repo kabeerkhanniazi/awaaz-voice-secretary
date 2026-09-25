@@ -64,31 +64,49 @@ The gateway serves the caller page itself from `gateway/web/`.
 
 ## Gateway messages (JSON over WebSocket unless noted)
 
-Phone → gateway: `REGISTER_MOBILE {authSecret}`, `MASTER_DIRECTIVE {data:{callId, action,
-spokenDirective?, holdMinutes?, directiveVersion}}` (actions: `holding`, `patchedToMaster`,
-`custom`, `declined`, `hangup`), `MASTER_SESSION_START {callId}`, `MASTER_SESSION_STOP`,
-`CALLER_CONTEXT {callId, relationship, company?, note?}`, `CALL_LOGGED {callId}`,
-`SYNC_MISSED_CALLS` (answered with `MISSED_CALLS`),
-binary mic frames.
+Phone → gateway:
+- `REGISTER_MOBILE {authSecret, line?}`. The line is a code instead of the secret, on a `DEMO_MODE` deployment only.
+- `MASTER_DIRECTIVE {data:{callId, action, spokenDirective?, holdMinutes?, directiveVersion}}`. Actions: `holding`, `patchedToMaster`, `custom`, `declined`, `checkIn` (the hold ran out), `hangup`.
+- `MASTER_SESSION_START {callId}`, `MASTER_SESSION_STOP`.
+- `CALLER_CONTEXT {callId, trust, relationship?, company?, note?, nameMatch?, warnings[]}`. Trust is `verified`, `recognised`, `unverified` or `warning`. The gateway keeps a relationship only for a verified caller.
+- `OWNER_SETTINGS {availability:{mode, until?, untilLabel?, note?}, links:[{token, name, alwaysRing, neverRing}], blockedDevices:[...]}`. Sent on every registration and whenever it changes. The Android service keeps a copy and re-sends it on its own.
+- `CALL_LOGGED {callId}`, `SYNC_MISSED_CALLS` (answered with `MISSED_CALLS`).
+- Binary mic frames.
 
-Gateway → phone: `REGISTERED_SUCCESS`, `AUTH_FAILED`, `INCOMING_CALL {callId, details?}`,
-`CALLER_DETAILS {callId, name, company, reason, urgent, message, callback}`, `TRANSCRIPT_UPDATE`,
-`TAKING_MESSAGE {callId}`, `MISSED_CALLS {calls:[{callId, startedAt, endedAt, details,
-tookMessage, transcript}]}`,
-`DIRECTIVE_STATE`, `DIRECTIVE_FAILED`, `CALLER_HUNG_UP`, `SESSION_EXPIRED`,
-`BRIDGE_CONNECTED`, `MASTER_SESSION_STATE {state}`, `MASTER_TRANSCRIPT {speaker, text}`,
-`MASTER_COMMAND {command: connect|hold|relay|task|end, ...}`, `MASTER_AUDIO_FLUSH`,
-binary audio (secretary speech or the caller on the bridge).
+Gateway → phone:
+- `REGISTERED_SUCCESS`, `AUTH_FAILED`.
+- `INCOMING_CALL {callId, details?, device, verified?:{name, via, token}, staleLink?, quiet?}`. `quiet` is `away` or `unavailable`: the phone doesn't ring and the secretary takes a message.
+- `CALLER_DETAILS {callId, name, company, reason, urgent, message, callbackNumber, callbackEmail, bestTime}`, `TRANSCRIPT_UPDATE`.
+- `TAKING_MESSAGE {callId}`, `MISSED_CALLS {calls:[{callId, startedAt, endedAt, details, device, verified?, tookMessage, transcript}]}`.
+- `DIRECTIVE_STATE`, `DIRECTIVE_FAILED`, `CALLER_HUNG_UP`, `SESSION_EXPIRED`.
+- `BRIDGE_CONNECTED`, `MASTER_SESSION_STATE {state}`, `MASTER_TRANSCRIPT {speaker, text}`, `MASTER_COMMAND {command: connect|hold|relay|task|end, ...}`, `MASTER_AUDIO_FLUSH`.
+- Binary audio: the secretary's speech, or the caller on the bridge.
 
-Caller page → gateway: `REGISTER_CALLER {callId}`, `TRANSCRIPT_UPDATE`, `CALLER_DETAILS`,
-`DIRECTIVE_STATE`, `DIRECTIVE_FAILED`, `SESSION_EXPIRED`, `BRIDGE_READY`, binary mic frames
-(bridge only). Gateway → caller page: `DIRECTIVE_UPDATED`, `TAKE_MESSAGE`, `BRIDGE_ENDED`, binary audio.
+Caller page → gateway:
+- `REGISTER_CALLER {callId}`, `TRANSCRIPT_UPDATE`, `CALLER_DETAILS`, `DIRECTIVE_STATE`, `DIRECTIVE_FAILED`, `SESSION_EXPIRED`, `BRIDGE_READY`.
+- Binary mic frames (bridge only).
 
-Only a socket that registered with the secret may act as a phone; a caller socket may only
-report on its own call. See `test/concurrent_routing.test.js`.
+Gateway → caller page:
+- `DIRECTIVE_UPDATED`.
+- `TAKE_MESSAGE {reason: away|busy|unavailable, untilLabel?, note?}`.
+- `BRIDGE_ENDED`, binary audio.
 
-HTTP: `GET /` caller page, `GET /api/voice-token` (rate-limited), `POST /api/call`
-(rate-limited), `POST /api/analyze-call` (needs `X-Awaaz-Secret`), `GET /health`.
+Only a socket that registered with the secret may act as a phone; a caller socket may only report on its own call. See `gateway/test/concurrent_routing.test.js`, `gateway/test/owner_settings.test.js` and `gateway/test/demo_lines.test.js`.
+
+HTTP:
+- `GET /`: the caller page.
+- `GET /api/voice-token`: rate-limited.
+- `POST /api/call {device?, from?, line?}`: rate-limited. Returns `verifiedName` for a personal link, and `403` for a blocked browser.
+- `POST /api/analyze-call`: needs `X-Awaaz-Secret`, or `X-Awaaz-Line` of a registered demo line.
+- `GET /health`: includes `demoMode`.
+
+## Who is really calling
+
+Only a personal link (`?from=TOKEN`, sent from the app to one contact, revocable) verifies a caller. Everything else is a claim:
+- A claimed name that matches a contact is shown as a match. The contact's relationship is never applied.
+- A browser that called before under another name, someone else's name on a link, or a stale link produces a warning. The rules are in `app/lib/core/caller_trust.dart`.
+- The owner's secretary briefs unverified callers as "someone who says…" and flags impersonation-scam patterns.
+- The caller-facing secretary never shares the owner's whereabouts or details.
 
 ## Configuration
 

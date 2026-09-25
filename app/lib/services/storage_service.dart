@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/demo_config.dart';
+import '../models/availability.dart';
 import '../models/call_record_model.dart';
 import '../models/secretary_task_model.dart';
 import '../models/contact_model.dart';
@@ -21,6 +22,9 @@ class StorageService {
   static String get defaultGatewayUrl => DemoConfig.enabled ? DemoConfig.gateway : _liveGatewayUrl;
 
   static const String _keySampleDataRemoved = 'awaaz_sample_data_removed';
+  static const String _keyAvailability = 'awaaz_availability';
+  static const String _keyBlockedCallers = 'awaaz_blocked_callers';
+  static const String _keyCountryCode = 'awaaz_country_code';
   static const String _keyAutoVoice = 'awaaz_auto_voice';
 
   final SharedPreferences prefs;
@@ -145,7 +149,7 @@ class StorageService {
   String? getApiKey() => prefs.getString(_keyApiKey);
   Future<void> setApiKey(String key) => prefs.setString(_keyApiKey, key);
 
-  String getMasterName() => prefs.getString(_keyMasterName) ?? 'Alex Sterling';
+  String getMasterName() => prefs.getString(_keyMasterName) ?? 'Kabeer';
   Future<void> setMasterName(String name) => prefs.setString(_keyMasterName, name);
 
   String getGatewayUrl() => prefs.getString(_keyGatewayUrl) ?? defaultGatewayUrl;
@@ -172,4 +176,36 @@ class StorageService {
   /// Off: he starts it from the call screen (saves AssemblyAI minutes).
   bool getAutoVoice() => prefs.getBool(_keyAutoVoice) ?? true;
   Future<void> setAutoVoice(bool enabled) => prefs.setBool(_keyAutoVoice, enabled);
+
+  /// Available, busy (until a time) or do-not-disturb.
+  Availability getAvailability() {
+    final raw = prefs.getString(_keyAvailability);
+    if (raw == null) return const Availability();
+    try {
+      return Availability.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return const Availability();
+    }
+  }
+
+  Future<void> setAvailability(Availability availability) =>
+      prefs.setString(_keyAvailability, jsonEncode(availability.toJson()));
+
+  /// Browsers Kabeer blocked (spam or impostor): device id -> {reason, name, at}.
+  Map<String, Map<String, dynamic>> getBlockedCallers() {
+    final raw = prefs.getString(_keyBlockedCallers);
+    if (raw == null) return {};
+    try {
+      return (jsonDecode(raw) as Map<String, dynamic>).map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map)));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> setBlockedCallers(Map<String, Map<String, dynamic>> blocked) =>
+      prefs.setString(_keyBlockedCallers, jsonEncode(blocked));
+
+  /// Country code for turning local numbers into WhatsApp numbers ("92" for Pakistan).
+  String getCountryCode() => prefs.getString(_keyCountryCode) ?? '92';
+  Future<void> setCountryCode(String code) => prefs.setString(_keyCountryCode, code.replaceAll(RegExp(r'\D'), ''));
 }

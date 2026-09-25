@@ -122,7 +122,7 @@
       </div>
     </div>
 
-    <footer>Uses your microphone during the call. The call may be transcribed so Kabeer can follow up.</footer>
+    <footer>Uses your microphone during the call. The call may be transcribed so Kabeer can follow up, and this browser is remembered so repeat callers can be recognised.</footer>
   </main>
 
   <script>
@@ -169,6 +169,24 @@
     // On the judges' demo deployment each phone has its own line, named in the
     // link the Awaaz app shows (/?line=CODE)
     const demoLine = (new URLSearchParams(window.location.search).get('line') || '').trim().toUpperCase();
+    // A personal link Kabeer gave someone (?from=CODE): it tells him who is calling
+    const personalLink = (new URLSearchParams(window.location.search).get('from') || '').trim().toUpperCase();
+
+    // An anonymous id for this browser, so Kabeer can recognise a repeat caller
+    // (and block one). Random, kept only in this browser; never sent anywhere else.
+    function browserId() {
+      try {
+        let id = localStorage.getItem('awaaz_device');
+        if (!id) {
+          id = (crypto.randomUUID && crypto.randomUUID()) ||
+            Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+          localStorage.setItem('awaaz_device', id);
+        }
+        return id;
+      } catch (e) {
+        return '';   // private mode or storage blocked: calls still work, just unrecognised
+      }
+    }
 
     function disableCall() {
       const callBtn = document.getElementById('btnCall');
@@ -347,14 +365,26 @@
         const callRes = await fetch('/api/call', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ callerName: 'Web Caller', topic: 'Direct Voice Call', ...(demoLine ? { line: demoLine } : {}) }),
+          body: JSON.stringify({
+            callerName: 'Web Caller',
+            topic: 'Direct Voice Call',
+            device: browserId(),
+            ...(personalLink ? { from: personalLink } : {}),
+            ...(demoLine ? { line: demoLine } : {}),
+          }),
         });
         if (callRes.status === 400 && (await callRes.clone().json().catch(() => ({}))).error === 'line_required') {
           throw new Error('Open the demo link shown in the Awaaz app to call your own phone.');
         }
+        if (callRes.status === 403) throw new Error("Sorry, this line isn't available right now.");
         if (!callRes.ok) throw new Error('Call registration rejected by gateway: ' + await callRes.text());
         const callData = await callRes.json();
         currentCallId = callData.callId;
+        // A personal link Kabeer gave this person: she may greet them by name
+        if (callData.verifiedName) {
+          persona.systemPrompt += `\n\nThis caller used the personal link Kabeer gave to ${callData.verifiedName}. ` +
+            `You may greet them as ${callData.verifiedName}. Everything else in your rules still applies.`;
+        }
 
         // Connect Gateway Relay WebSocket (C1: call routing)
         const relayProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -392,16 +422,20 @@
                     session: {
                       system_prompt: persona.systemPrompt +
                         "\n\nUpdate: Kabeer is not available for this call. Stop saying you are checking. " +
-                        'Take a message (step 5), then say goodbye and call end_call.',
+                        'Take a message and their contact details (steps 5 and 6), then say goodbye and call end_call.',
                     },
                   }));
                 }
-                const why = msg.reason === 'busy'
-                  ? 'Kabeer is on another call right now.'
-                  : "Kabeer can't take the call right now.";
+                // He set himself as away: say when he'll be free, never where he is
+                const back = msg.untilLabel ? ` He expects to be free after ${msg.untilLabel}.` : '';
+                const why = msg.reason === 'away'
+                  ? `Kabeer is not taking calls right now${msg.note ? ` (${msg.note})` : ''}.${back}`
+                  : msg.reason === 'busy'
+                    ? 'Kabeer is on another call right now.'
+                    : "Kabeer can't take the call right now.";
                 sendDirective(
-                  why + ' Tell the caller this politely and offer to take a message: ' +
-                  'ask what they would like him to know and how or when to call them back. Speak as his secretary.',
+                  why + ' Tell the caller this politely and offer to take a message: ask what they would like him to know. ' +
+                  'Then make sure you can reach them: a phone number or email, and the best time, read back and confirmed. Speak as his secretary.',
                   0,
                 );
               }
@@ -424,7 +458,9 @@
                 return;
               }
               if (action === 'patchedToMaster') bridgePending = true;
-              if (action === 'declined') endAfterDirective = true;
+              // Kabeer won't take it: she still collects how to reach the caller
+              // and ends the call herself; the wrap-up timer is only a safety net
+              if (action === 'declined') startWrapUp();
 
               const instructions = buildDirectiveInstructions(action, spokenDirective, holdMinutes);
               if (!instructions) return;
@@ -649,7 +685,15 @@
         return 'Kabeer has decided to take this call. Tell the caller now that you are connecting them to Kabeer and ask them to stay on the line.' + voiceRule;
       }
       if (action === 'declined') {
-        return 'Kabeer is not available right now. Tell the caller politely that he is unavailable, that you have noted their name and reason for calling, and that he will get back to them. Then say goodbye.' + voiceRule;
+        return "Kabeer can't take this call now. Tell the caller politely that he is unavailable and will get back to them. " +
+          'Before you say goodbye, make sure you can reach them: a phone number or email address, and the best time. ' +
+          'Read a number back digit by digit, or spell an email back, and ask them to confirm, then record it with save_caller_details. ' +
+          'If they would rather not share it, accept that. Then say goodbye and call end_call.' + voiceRule;
+      }
+      if (action === 'checkIn') {
+        return 'The hold time is up and Kabeer is still busy. Apologise for the wait and ask whether the caller would like to keep holding a little longer or leave a message. ' +
+          'If they leave a message, take it and their contact details (a number or email, and the best time, read back and confirmed), then say goodbye and call end_call. ' +
+          "If they want to keep holding, say you will let Kabeer know." + voiceRule;
       }
       const clean = sanitizeDirective(spokenDirective);
       if (!clean) return '';
@@ -672,7 +716,9 @@
           reason: args.reason || '',
           urgent: args.urgent === true,
           message: args.message || '',
-          callback: args.callback || '',
+          callbackNumber: args.callbackNumber || '',
+          callbackEmail: args.callbackEmail || '',
+          bestTime: args.bestTime || '',
         });
         ok = true;
       } else if (tool.name === 'end_call') {
@@ -763,7 +809,18 @@
       // Kabeer is waiting to talk: connect even if the hand-off line wasn't spoken
       if (bridgePending) startBridge();
       // Kabeer ended the call: end it even if the goodbye wasn't spoken
-      if (endAfterDirective) endAfterPlayback();
+      if (endAfterDirective || wrappingUp) endAfterPlayback();
+    }
+
+    // After Kabeer declines, the secretary takes the caller's details and says
+    // goodbye herself; if that somehow never happens, hang up anyway
+    const WRAP_UP_MAX_MS = 2 * 60 * 1000;
+    let wrappingUp = false;
+    let wrapUpTimer = null;
+    function startWrapUp() {
+      wrappingUp = true;
+      clearTimeout(wrapUpTimer);
+      wrapUpTimer = setTimeout(() => { if (relayWs) endAfterPlayback(); }, WRAP_UP_MAX_MS);
     }
 
     // Hangs up once the secretary's goodbye has finished playing
@@ -840,6 +897,8 @@
       pendingToolResults = [];
       endWhenReplyDone = false;
       callerSaidBye = false;
+      wrappingUp = false;
+      clearTimeout(wrapUpTimer);
       if (pendingDirective) {
         clearTimeout(pendingDirective.timer);
         pendingDirective = null;

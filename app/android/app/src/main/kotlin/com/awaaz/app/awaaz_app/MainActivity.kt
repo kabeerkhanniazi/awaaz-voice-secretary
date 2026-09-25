@@ -101,6 +101,10 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(null)
                 }
+                "setOwnerSettings" -> {
+                    AwaazService.setOwnerSettings(this, call.argument<String>("json") ?: "")
+                    result.success(null)
+                }
                 "setStandby" -> {
                     AwaazService.setStandby(this, call.argument<Boolean>("enabled") == true)
                     result.success(null)

@@ -27,8 +27,11 @@ const QUEUED_REPLY_PAUSE_MS = 1500;
 const BASE_PROMPT = `You are Kabeer's personal secretary. Right now you are talking privately with Kabeer himself, on his phone, about a caller you are screening on another line. The caller cannot hear this conversation.
 
 How to talk to Kabeer:
-- Address him directly ("John from Acme is calling about..."). Be very brief: one or two short sentences.
+- Address him directly and be very brief: one or two short sentences.
 - The caller's name, company and reason are known ONLY when they appear under "Confirmed caller details" or in a live note starting "Confirmed caller details". Until then, say the caller hasn't given a name yet. Never guess or make up a name, company or reason.
+- Who the caller is: a name is only what the caller said, unless the details say "Trust: verified". For anyone not verified, say "someone who says he's John from Acme", never "John is calling". Never call an unverified caller by a relationship ("your client", "your brother") even if the name matches one of Kabeer's contacts.
+- If the details list warnings, say the most important one first, in plain words.
+- Scam pattern: if the caller claims authority or importance (an official, a professor, a bank, the police, a boss) together with urgency, or asks for money, payments, codes, passwords, ID numbers or documents, warn Kabeer briefly that this matches a common impersonation scam and suggest he verifies them on a number or email he finds himself.
 - Other facts come only from the call notes and live notes. If you don't know something, say the secretary line is still finding out.
 - If he asks what the caller said, summarise it faithfully.
 
@@ -138,20 +141,33 @@ function notesFrom(transcript) {
   return transcript.map(t => `${t.speaker}: ${t.text}`).join('\n');
 }
 
-function detailsFrom(details = {}, context = null) {
+function trustLine(verified, context) {
+  if (verified) return `Trust: verified. The caller came through the personal link Kabeer gave to ${verified.name}.`;
+  if (context?.trust === 'recognised') return 'Trust: not verified, but this browser has called Kabeer before under the same name.';
+  return 'Trust: not verified. The name is only what the caller said.';
+}
+
+function detailsFrom(details = {}, context = null, verified = null) {
   const lines = [
-    `Name: ${details.name || 'not given yet'}`,
+    trustLine(verified, context),
+    `Name the caller gave: ${details.name || 'not given yet'}`,
     `Company: ${details.company || 'not given'}`,
     `Reason: ${details.reason || 'not given yet'}`,
     `Urgent: ${details.urgent ? 'yes' : 'not stated'}`,
   ];
   if (details.message) lines.push(`Message for Kabeer: ${details.message}`);
   if (details.callback) lines.push(`Call back: ${details.callback}`);
-  if (context?.relationship) {
-    // From Kabeer's own contacts on his phone
+  if (details.callbackNumber) lines.push(`Call-back number: ${details.callbackNumber}`);
+  if (details.callbackEmail) lines.push(`Call-back email: ${details.callbackEmail}`);
+  if (details.bestTime) lines.push(`Best time to reach them: ${details.bestTime}`);
+  for (const warning of context?.warnings || []) lines.push(`Warning: ${warning}`);
+  if (verified && context?.relationship) {
+    // From Kabeer's own contacts, and only for a verified caller
     lines.push(`In Kabeer's contacts as: ${context.relationship}`);
     if (context.company) lines.push(`Contact's company: ${context.company}`);
     if (context.note) lines.push(`Kabeer's note about them: ${context.note}`);
+  } else if (context?.nameMatch) {
+    lines.push(`A contact named ${context.nameMatch} exists, but this caller is not verified as that person.`);
   }
   return lines.join('\n');
 }
@@ -210,7 +226,7 @@ class MasterSession {
   }
 
   _prompt() {
-    return `${BASE_PROMPT}\n\n${todayLine()}\n\nConfirmed caller details:\n${detailsFrom(this.call.details, this.call.context)}\n\nCall notes so far:\n${notesFrom(this.call.transcript)}${waitingFrom(this.otherCallers())}`;
+    return `${BASE_PROMPT}\n\n${todayLine()}\n\nConfirmed caller details:\n${detailsFrom(this.call.details, this.call.context, this.call.verified)}\n\nCall notes so far:\n${notesFrom(this.call.transcript)}${waitingFrom(this.otherCallers())}`;
   }
 
   /** Another caller rang or gave their details: keep the waiting list current. */
@@ -434,7 +450,7 @@ class MasterSession {
     const known = this.call.context?.relationship;
     this._sendAgent({
       type: 'reply.create',
-      instructions: `The secretary line has just confirmed:\n${detailsFrom(this.call.details, this.call.context)}\n` +
+      instructions: `The secretary line has just confirmed:\n${detailsFrom(this.call.details, this.call.context, this.call.verified)}\n` +
         `In one short sentence, tell Kabeer who is calling and why${known ? ', mentioning how he knows them' : ''}. ` +
         'Mention only what is confirmed above.',
     });

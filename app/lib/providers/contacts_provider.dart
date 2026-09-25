@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact_model.dart';
 import '../core/constants/relationship_constants.dart';
+import '../core/contact_actions.dart';
 import 'storage_provider.dart';
 
 class ContactsNotifier extends Notifier<List<ContactModel>> {
@@ -14,17 +15,51 @@ class ContactsNotifier extends Notifier<List<ContactModel>> {
   }
 
   void updateRelationship(String contactId, RelationshipCategory newCategory) {
-    _save(state.map((c) {
-      if (c.id != contactId) return c;
-      return ContactModel(
-        id: c.id,
-        name: c.name,
-        phoneNumber: c.phoneNumber,
-        relationship: newCategory,
-        company: c.company,
-        customNotes: c.customNotes,
-      );
-    }).toList());
+    _update(contactId, (c) => c.copyWith(relationship: newCategory));
+  }
+
+  void _update(String contactId, ContactModel Function(ContactModel) change) {
+    _save(state.map((c) => c.id == contactId ? change(c) : c).toList());
+  }
+
+  ContactModel? byId(String contactId) {
+    for (final c in state) {
+      if (c.id == contactId) return c;
+    }
+    return null;
+  }
+
+  /// The contact's personal-link token, created the first time it is shared.
+  String ensureLinkToken(String contactId) {
+    final existing = byId(contactId)?.linkToken;
+    if (existing != null) return existing;
+    final token = ContactActions.newLinkToken();
+    _update(contactId, (c) => c.copyWith(linkToken: token, linkDevices: const []));
+    return token;
+  }
+
+  /// Stops the old link working and returns a new one to send instead.
+  String revokeLink(String contactId) {
+    final token = ContactActions.newLinkToken();
+    _update(contactId, (c) => c.copyWith(linkToken: token, linkDevices: const []));
+    return token;
+  }
+
+  /// Remembers a browser that called through this contact's link.
+  void recordLinkDevice(String contactId, String deviceId) {
+    final contact = byId(contactId);
+    if (contact == null || deviceId.isEmpty || contact.linkDevices.contains(deviceId)) return;
+    // Keep the last few; a person rarely has more browsers than that
+    final devices = [...contact.linkDevices, deviceId];
+    _update(contactId, (c) => c.copyWith(linkDevices: devices.length > 8 ? devices.sublist(devices.length - 8) : devices));
+  }
+
+  /// "Always ring" and "never ring" exclude each other.
+  void setRinging(String contactId, {bool? alwaysRing, bool? neverRing}) {
+    _update(contactId, (c) => c.copyWith(
+          alwaysRing: alwaysRing ?? (neverRing == true ? false : c.alwaysRing),
+          neverRing: neverRing ?? (alwaysRing == true ? false : c.neverRing),
+        ));
   }
 
   void upsertContact(ContactModel contact) {

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/call_record_model.dart';
+import '../core/theme/app_theme.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/owner_provider.dart';
 import '../widgets/common.dart';
 import '../widgets/demo_line_card.dart';
 import 'call_detail_screen.dart';
+import 'settings_tab.dart' show showAvailabilitySheet;
 
 class CallRecordsTab extends ConsumerStatefulWidget {
   const CallRecordsTab({super.key});
@@ -57,6 +60,18 @@ class _CallRecordsTabState extends ConsumerState<CallRecordsTab> {
               )
             : const Text('Calls'),
         actions: [
+          // One tap to go busy or do-not-disturb; the secretary takes messages
+          Consumer(builder: (context, ref, _) {
+            final away = ref.watch(ownerProvider.select((o) => o.availability)).isAwayAt(DateTime.now());
+            return IconButton(
+              tooltip: away ? "You're away" : 'Available',
+              icon: Icon(
+                away ? Icons.do_not_disturb_on_outlined : Icons.check_circle_outline,
+                color: away ? StatusColors.of(context).warning : null,
+              ),
+              onPressed: () => showAvailabilitySheet(context, ref),
+            );
+          }),
           IconButton(
             tooltip: _searching ? 'Close search' : 'Search',
             icon: Icon(_searching ? Icons.close : Icons.search),

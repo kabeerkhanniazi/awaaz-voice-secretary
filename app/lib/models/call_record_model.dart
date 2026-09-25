@@ -71,6 +71,16 @@ class CallRecordModel {
   final List<TranscriptEntry> transcript;
   final CallActionStatus actionStatus;
   final String? extractedActionItem;
+  // How to reach the caller, as they confirmed it to the secretary
+  final String? callbackNumber;
+  final String? callbackEmail;
+  final String? bestTime;
+  final String? callerMessage;
+  // The caller page's anonymous browser id, to recognise (or block) a repeat caller
+  final String? deviceId;
+  // 'verified' | 'recognised' | 'unverified' | 'warning', and why
+  final String? trust;
+  final String? trustNote;
 
   CallRecordModel({
     required this.id,
@@ -84,6 +94,13 @@ class CallRecordModel {
     required this.transcript,
     required this.actionStatus,
     this.extractedActionItem,
+    this.callbackNumber,
+    this.callbackEmail,
+    this.bestTime,
+    this.callerMessage,
+    this.deviceId,
+    this.trust,
+    this.trustNote,
   });
 
   Map<String, dynamic> toJson() {
@@ -99,6 +116,13 @@ class CallRecordModel {
       'transcript': transcript.map((e) => e.toJson()).toList(),
       'actionStatus': actionStatus.name,
       'extractedActionItem': extractedActionItem,
+      'callbackNumber': callbackNumber,
+      'callbackEmail': callbackEmail,
+      'bestTime': bestTime,
+      'callerMessage': callerMessage,
+      'deviceId': deviceId,
+      'trust': trust,
+      'trustNote': trustNote,
     };
   }
 
@@ -123,6 +147,13 @@ class CallRecordModel {
         orElse: () => CallActionStatus.secretaryResolved,
       ),
       extractedActionItem: json['extractedActionItem'] as String?,
+      callbackNumber: json['callbackNumber'] as String?,
+      callbackEmail: json['callbackEmail'] as String?,
+      bestTime: json['bestTime'] as String?,
+      callerMessage: json['callerMessage'] as String?,
+      deviceId: json['deviceId'] as String?,
+      trust: json['trust'] as String?,
+      trustNote: json['trustNote'] as String?,
     );
   }
 

@@ -44,6 +44,8 @@ dependencies:
   permission_handler: ^13.0.2
   record: ^7.1.1
   flutter_secure_storage: ^11.2.0
+  url_launcher: ^6.3.2
+  share_plus: ^13.3.0
 
 dev_dependencies:
   flutter_test:

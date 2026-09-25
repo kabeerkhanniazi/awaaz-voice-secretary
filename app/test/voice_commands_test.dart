@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:awaaz_app/core/caller_trust.dart';
 import 'package:awaaz_app/core/constants/relationship_constants.dart';
+import 'package:awaaz_app/models/call_record_model.dart';
+import 'package:awaaz_app/providers/owner_provider.dart';
 import 'package:awaaz_app/providers/call_provider.dart';
 import 'package:awaaz_app/providers/dashboard_provider.dart';
 import 'package:awaaz_app/providers/storage_provider.dart';
@@ -25,10 +28,11 @@ void main() {
     SharedPreferences.setMockInitialValues({
       'awaaz_call_logs': '[]',
       'awaaz_tasks': '[]',
-      'awaaz_contacts': '[{"id":"c9","name":"Maria Lopez","phoneNumber":"","relationship":"vipClient","company":"Brightline Studios","customNotes":null}]',
+      'awaaz_contacts': '[{"id":"c9","name":"Maria Lopez","phoneNumber":"","relationship":"vipClient","company":"Brightline Studios","customNotes":null,"linkToken":"MARIALINK01"}]',
     });
     final prefs = await SharedPreferences.getInstance();
     container = ProviderContainer(overrides: [sharedPreferencesProvider.overrideWithValue(prefs)]);
+    ws.debugSent = [];
     container.read(callProvider);
     await deliver({'type': 'INCOMING_CALL', 'callId': callId, 'callerName': 'Web Caller'});
   });
@@ -63,7 +67,19 @@ void main() {
     expect(state.transcriptEntries.last.speaker, 'Master');
   });
 
-  test('caller details name the caller; a known contact shows how Kabeer knows them', () async {
+  // A new call with the given gateway fields, after the one from setUp has cleared
+  Future<void> freshCall(String id, Map<String, dynamic> extra) async {
+    await deliver({'type': 'CALLER_HUNG_UP', 'callId': callId});
+    await Future<void>.delayed(const Duration(milliseconds: 2300));
+    await deliver({'type': 'INCOMING_CALL', 'callId': id, 'callerName': 'Web Caller', ...extra});
+  }
+
+  Map<String, dynamic>? lastSent(String type) {
+    final matches = ws.debugSent!.where((m) => m['type'] == type).toList();
+    return matches.isEmpty ? null : matches.last;
+  }
+
+  test("a caller who only says a contact's name is a claim, not that contact", () async {
     expect(container.read(callProvider).callerUnknown, isTrue);
     await deliver({
       'type': 'CALLER_DETAILS', 'callId': callId,
@@ -72,10 +88,87 @@ void main() {
     final state = container.read(callProvider);
     expect(state.callerUnknown, isFalse);
     expect(state.activeScenario!.callerName, 'Maria Lopez');
-    expect(state.activeScenario!.relationship, RelationshipCategory.vipClient);
+    // Never "your VIP client" on a name alone
+    expect(state.activeScenario!.relationship, RelationshipCategory.unknown);
+    expect(state.trust.level, TrustLevel.unverified);
+    expect(state.trust.nameMatch, 'Maria Lopez');
     expect(state.callerCompany, 'Brightline');
     expect(state.callerReason, 'Design review on Friday');
     expect(state.urgent, isTrue);
+    // Kabeer's secretary is told the same: a match, not a relationship
+    final context = lastSent('CALLER_CONTEXT')!;
+    expect(context['trust'], 'unverified');
+    expect(context['nameMatch'], 'Maria Lopez');
+    expect(context.containsKey('relationship'), isFalse);
+  });
+
+  test('a caller through a personal link is verified, under the name Kabeer saved', () async {
+    await freshCall('call_link', {
+      'device': 'dev-maria',
+      'verified': {'name': 'Maria Lopez', 'via': 'link', 'token': 'MARIALINK01'},
+    });
+    var state = container.read(callProvider);
+    expect(state.trust.level, TrustLevel.verified);
+    expect(state.activeScenario!.callerName, 'Maria Lopez');
+    expect(state.activeScenario!.relationship, RelationshipCategory.vipClient);
+    expect(lastSent('CALLER_CONTEXT')!['relationship'], RelationshipCategory.vipClient.displayName);
+
+    // Using Maria's link but giving another name is a warning
+    await deliver({'type': 'CALLER_DETAILS', 'callId': 'call_link', 'name': 'Professor Hamid'});
+    state = container.read(callProvider);
+    expect(state.trust.level, TrustLevel.warning);
+    expect(state.trust.note, contains('Maria Lopez'));
+  });
+
+  test('a browser that called as Ali and now claims to be a professor is flagged', () async {
+    container.read(dashboardProvider.notifier).addCallLog(CallRecordModel(
+      id: 'earlier', callerName: 'Ali Khan', phoneNumber: '', relationship: RelationshipCategory.unknown,
+      timestamp: DateTime(2026, 9, 20), durationSeconds: 30, sentimentScore: 0, lemurSummary: '',
+      transcript: const [], actionStatus: CallActionStatus.secretaryResolved, deviceId: 'dev-ali',
+    ));
+    await freshCall('call_prof', {'device': 'dev-ali'});
+    await deliver({'type': 'CALLER_DETAILS', 'callId': 'call_prof', 'name': 'Professor Hamid', 'company': 'QAU'});
+    final state = container.read(callProvider);
+    expect(state.trust.level, TrustLevel.warning);
+    expect(state.trust.note, 'This browser called before as Ali Khan');
+    expect(lastSent('CALLER_CONTEXT')!['warnings'], contains('This browser called before as Ali Khan'));
+  });
+
+  test('marking an impostor blocks that browser and tells the gateway', () async {
+    await freshCall('call_imp', {'device': 'dev-imp'});
+    await deliver({'type': 'CALLER_DETAILS', 'callId': 'call_imp', 'name': 'Professor Hamid'});
+    container.read(callProvider.notifier).markImpostorAndEnd();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    final blocked = container.read(ownerProvider).blocked['dev-imp'];
+    expect(blocked?['reason'], 'impostor');
+    expect(blocked?['name'], 'Professor Hamid');
+    expect(lastSent('OWNER_SETTINGS')!['blockedDevices'], contains('dev-imp'));
+  });
+
+  test('the number and email a caller confirmed reach the record and a task you can dial', () async {
+    await deliver({
+      'type': 'CALLER_DETAILS', 'callId': callId, 'name': 'Sam Reed', 'message': 'The lease papers are ready',
+      'callbackNumber': '0300 1234567', 'callbackEmail': 'sam@example.com', 'bestTime': 'after 5 pm',
+    });
+    await deliver({'type': 'MASTER_COMMAND', 'callId': callId, 'command': 'end'});
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final dashboard = container.read(dashboardProvider);
+    final record = dashboard.callLogs.firstWhere((c) => c.id == callId);
+    expect(record.callbackNumber, '0300 1234567');
+    expect(record.callbackEmail, 'sam@example.com');
+    expect(record.bestTime, 'after 5 pm');
+    final task = dashboard.tasks.firstWhere((t) => t.callRecordId == callId);
+    expect(task.actionItem, 'Call back Sam Reed (0300 1234567): The lease papers are ready');
+    expect(task.phoneNumber, '0300 1234567');
+    expect(task.email, 'sam@example.com');
+  });
+
+  test('a quiet call (Kabeer away) does not open his voice session', () async {
+    await freshCall('call_quiet', {'quiet': 'away'});
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final state = container.read(callProvider);
+    expect(state.quiet, 'away');
+    expect(state.voiceStatus, isNull);
   });
 
   test('details for another call do not rename this one', () async {

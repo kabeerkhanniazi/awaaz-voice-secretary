@@ -35,9 +35,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final call = ref.watch(callProvider);
     final callActive = call.status != ActiveCallStatus.idle;
 
-    // A new call always opens full screen
+    // A new call opens full screen, unless it's a quiet one (Kabeer is away, or
+    // a "never ring" contact): then it stays a bar at the top until he opens it
     ref.listen(callProvider.select((s) => s.currentCallId), (previous, next) {
-      if (next != null && next != previous) setState(() => _callMinimized = false);
+      if (next != null && next != previous) {
+        setState(() => _callMinimized = ref.read(callProvider).quiet != null);
+      }
     });
 
     return Stack(

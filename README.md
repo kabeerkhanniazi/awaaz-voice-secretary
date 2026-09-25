@@ -9,7 +9,9 @@ A caller opens a link and presses Call. An AI secretary, built on the **Assembly
 - *"Hold for five minutes."* → the caller is asked to hold, and your phone counts down.
 - *"Tell him I will call back tomorrow."* → she says it to the caller in her own words ("Kabeer will call you back tomorrow").
 - *"Remind me to send the invoice by Friday."* → a task with a real due date.
-- Nobody answers? After 90 seconds she says you are unavailable, takes a message and a call-back number, reads it back, and ends the call politely.
+- Nobody answers, or you say *"end the call"*? Before any goodbye she gets a way to reach the caller: a number or email and the best time, read back digit by digit and confirmed. You get a "Call back" task with a button that dials.
+- *"Busy for an hour"* or *do not disturb*: she takes messages straight away and tells callers when you'll be free. People you choose can still always get through.
+- **She never takes a name on trust** (see [Who is really calling](#who-is-really-calling)).
 
 Built solo in Pakistan for the [lablab.ai AssemblyAI Voice Agent Hackathon](https://lablab.ai/ai-hackathons/assemblyai-voice-agent-hackathon), September 2026.
 
@@ -51,6 +53,22 @@ Built solo in Pakistan for the [lablab.ai AssemblyAI Voice Agent Hackathon](http
 
 Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Who is really calling
+
+A web caller has no caller ID, so a name is only what they say. Awaaz never presents a claim as fact:
+
+| What you see | When |
+|---|---|
+| **Verified: via Maria's link** | They called through the personal link you sent them (Contacts, then Send on WhatsApp). This is the only thing that verifies a caller. You can revoke a link at any time. |
+| **Not verified** | Anyone else. If the name matches a contact, you see "name matches your contact Maria Lopez", never "your VIP client". |
+| **Warning** | The same browser called before under another name ("This browser called before as Ali Khan"); someone used Maria's link but gave another name; or an old or revoked link was used. |
+
+On top of that:
+- **Your secretary warns you about scam patterns.** Someone claiming authority (an official, a bank, a professor) with urgency, or asking for money, codes or documents, gets flagged, with a suggestion to verify them on a number you find yourself.
+- **The caller's secretary gives nothing away.** She never shares where you are, your schedule, your contacts or your numbers, and agrees to nothing when a caller claims authority.
+- **Impostor or spam: one tap blocks that browser**, and the gateway refuses its calls from then on.
+- **"Always ring" and "never ring" only apply to calls through a personal link**, so nobody can get past do-not-disturb by giving a name.
+
 ## Where AssemblyAI is used
 
 | What | Where in this repo |
@@ -79,8 +97,8 @@ Run these yourself:
 
 | Check | Command | Result |
 |---|---|---|
-| Gateway routing, roles, security, message-taking, demo-line isolation | `cd gateway && npm install && npm test` | 23 checks pass |
-| Flutter app: state machine, voice commands, missed calls, demo build | `cd app && flutter test` | 18 tests pass |
+| Gateway routing, roles, security, message-taking, demo-line isolation, personal links, blocking, availability | `cd gateway && npm install && npm test` | 27 checks pass |
+| Flutter app: state machine, voice commands, missed calls, caller trust, call-back details, demo build | `cd app && flutter test` | 34 tests pass |
 | Static analysis | `cd app && flutter analyze --fatal-infos` | no issues |
 
 Both suites run in CI on every push ([.github/workflows/ci.yml](.github/workflows/ci.yml)), with no API key and no network.
@@ -91,6 +109,8 @@ Both suites run in CI on every push ([.github/workflows/ci.yml](.github/workflow
 - Only a socket that presents `GATEWAY_AUTH_SECRET` can act as the owner. The comparison is constant-time.
 - Per-IP rate limits on the public endpoints, and random UUID call IDs.
 - The caller page shows no transcript; the caller sees only the call status.
+- The caller page keeps a random, anonymous id in the browser so a repeat caller can be recognised or blocked. The page footer says so. It isn't a fingerprint, and it goes nowhere except your own gateway.
+- Personal-link tokens are random and revocable, and live only on your phone and your gateway.
 - Call records, tasks and contacts stay on the phone. The gateway keeps a call in memory only while it is live, plus up to 24 hours for calls the phone has not logged yet.
 
 ## Run it yourself
@@ -154,6 +174,8 @@ cd app && flutter build apk --release --dart-define=AWAAZ_DEMO_GATEWAY=wss://<yo
 - Missed calls live in the gateway's memory, so a restart before the phone reconnects loses them.
 - The secretary's persona names "Kabeer" (see `SECRETARY_SYSTEM_PROMPT` in `gateway/server.js`); change it for your own deployment.
 - The post-call summary uses the only model this AssemblyAI account can reach; override with `SUMMARY_MODEL`.
+- **English only.** The Voice Agent API supports six languages (English, Spanish, French, German, Italian, Portuguese), and Urdu and Hindi aren't among them, so a caller she can't understand is asked to continue in English or leave a number. A real Urdu secretary would use AssemblyAI's real-time transcription (which supports Urdu) with your own model and voice, and is on the roadmap.
+- Verifying a *stranger* (someone with no personal link) still means checking them yourself, on a number or email you find. Emailing them a one-time code is the next step.
 
 ## Project history
 

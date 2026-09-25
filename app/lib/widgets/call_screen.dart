@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/caller_trust.dart';
 import '../core/constants/relationship_constants.dart';
 import '../core/theme/app_theme.dart';
 import '../models/call_record_model.dart';
@@ -78,9 +79,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                       icon: const Icon(Icons.more_horiz),
                       onSelected: (value) {
                         if (value == 'spam') notifier.markSpamAndEnd();
+                        if (value == 'impostor') notifier.markImpostorAndEnd();
                       },
                       itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'spam', child: Text('Mark as spam and end')),
+                        PopupMenuItem(value: 'spam', child: Text('Spam: block and end')),
+                        PopupMenuItem(value: 'impostor', child: Text('Impostor: block and end')),
                       ],
                     )
                   else
@@ -107,6 +110,10 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                       textAlign: TextAlign.center,
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
+                  ],
+                  if (call.isRealCall) ...[
+                    const SizedBox(height: 6),
+                    _TrustLine(trust: call.trust),
                   ],
                   if (call.urgent) ...[
                     const SizedBox(height: 6),
@@ -168,6 +175,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       case ActiveCallStatus.callEnded:
         return 'Call ended';
       default:
+        // Kabeer set himself away, or a "never ring" contact: she takes a message
+        if (call.quiet != null) return 'Your secretary is taking a message · ${clockLabel(elapsed)}';
         return 'Your secretary is answering · ${clockLabel(elapsed)}';
     }
   }
@@ -267,6 +276,45 @@ class _SecretaryPanel extends ConsumerWidget {
 }
 
 /// What Kabeer last asked the secretary to tell the caller, and whether she has.
+/// Who the caller really is: verified by a personal link, or only a claim.
+class _TrustLine extends StatelessWidget {
+  final CallerTrust trust;
+
+  const _TrustLine({required this.trust});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final status = StatusColors.of(context);
+    final (icon, color) = switch (trust.level) {
+      TrustLevel.verified => (Icons.verified_outlined, status.live),
+      TrustLevel.warning => (Icons.warning_amber_rounded, scheme.error),
+      _ => (Icons.help_outline, scheme.onSurfaceVariant),
+    };
+    final note = trust.note;
+    return Column(
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Flexible(child: Text(trust.label, style: TextStyle(fontSize: 13, color: color))),
+          ],
+        ),
+        if (note != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            note,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: trust.level == TrustLevel.warning ? scheme.error : scheme.onSurfaceVariant),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _DirectiveLine extends StatelessWidget {
   final CallState call;
 
