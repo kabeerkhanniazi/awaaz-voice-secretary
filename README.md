@@ -25,7 +25,7 @@ Built solo in Pakistan for the [lablab.ai AssemblyAI Voice Agent Hackathon](http
 |---|---|
 | **Hear the secretary (caller side)** | Open https://aivs.up.railway.app and press Call. Works in any desktop browser with a microphone. |
 | **See both sides** | Watch the demo video (link in the submission). Caller page on the left, phone on the right, in one take. |
-| **Be the owner yourself** | Install the **demo APK** from [Releases](../../releases) on an Android phone. Open it: the Calls tab shows **Your demo line** with a link. Open that link on a laptop and press Call. Your phone rings, and you play Kabeer. No account, no API key, no secret to type. See [The demo line](#the-demo-line). |
+| **Be the owner yourself** | Install the **[demo APK](https://github.com/kabeerkhanniazi/awaaz-voice-secretary/releases/tag/demo-apk-1)** on an Android phone. Open it: the Calls tab shows **Your demo line** with a link. Open that link on a laptop and press Call. Your phone rings, and you play Kabeer. No account, no API key, no secret to type. See [The demo line](#the-demo-line). |
 | **Run the whole thing yourself** | See [Run it yourself](#run-it-yourself). You need a free AssemblyAI key. |
 
 ---
@@ -144,8 +144,10 @@ Requires Flutter (see [`app/.flutter-version`](app/.flutter-version)) and an And
 
 The live line rings Kabeer's own phone, so its secret stays private. For judges there is a separate **demo line**: the same gateway code, deployed a second time with `DEMO_MODE=1`.
 
+**Try it:** install [`awaaz-demo.apk`](https://github.com/kabeerkhanniazi/awaaz-voice-secretary/releases/tag/demo-apk-1) on an Android phone. The release notes have the install steps and a SHA-256 checksum. Then open the link the app shows on a laptop, and press Call. The hosted demo line is `https://awaaz-demo.up.railway.app`.
+
 - **No secret.** A phone registers with its own **line code** instead. The demo APK creates one on first launch and keeps it.
-- **Personal lines.** The app shows its link, `https://<demo gateway>/?line=K7Q2PX`. A call placed through that link rings **that phone only**. Every message, directive, secretary session, missed call and log is kept to its own line, so any number of judges can try it at the same time without ringing each other or steering each other's calls. The isolation is tested in [`gateway/test/demo_lines.test.js`](gateway/test/demo_lines.test.js).
+- **Personal lines.** The app shows its link, `https://awaaz-demo.up.railway.app/?line=K7Q2PX`. A call placed through that link rings **that phone only**. Every message, directive, secretary session, missed call and log is kept to its own line, so any number of judges can try it at the same time without ringing each other or steering each other's calls. The isolation is tested in [`gateway/test/demo_lines.test.js`](gateway/test/demo_lines.test.js).
 - **Nothing changes on the live line.** Outside demo mode every phone and call sits on the one empty line, so behaviour is exactly as before. The original routing and security checks run unchanged.
 
 Run your own demo line:
