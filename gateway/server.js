@@ -566,6 +566,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // The owner page: take calls in any browser, iPhone included, without the app
+  if (pathname === '/owner' || pathname === '/owner.html') {
+    fs.readFile(path.join(webDir, 'owner.html'), (err, data) => {
+      if (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Error loading owner page');
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(data);
+      }
+    });
+    return;
+  }
+
   // Serve pcm-processor.js (AudioWorklet)
   if (pathname === '/pcm-processor.js') {
     const filePath = path.join(webDir, 'pcm-processor.js');

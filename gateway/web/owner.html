@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Take your calls · Awaaz</title>
+  <style>
+    :root {
+      --bg: #F7F7F5; --surface: #FFFFFF; --text: #1C1C1A; --muted: #6B6B66; --line: #E2E2DE;
+      --accent: #1F6F5C; --on-accent: #FFFFFF; --danger: #B3402A; --warn: #9A6200; --soft: #EEF4F1;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121212; --surface: #191919; --text: #EDEDEB; --muted: #9D9D98; --line: #2E2E2E;
+        --accent: #5BB79E; --on-accent: #0B1F1A; --danger: #E0735E; --warn: #E0A84A; --soft: #1C2522;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg); color: var(--text);
+      padding: 24px 16px 40px; -webkit-font-smoothing: antialiased;
+    }
+    main { width: 100%; max-width: 460px; margin: 0 auto; }
+    .brand { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+    h1 { margin-top: 6px; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+    h2 { font-size: 16px; font-weight: 600; }
+    .lead { margin-top: 6px; color: var(--muted); font-size: 15px; line-height: 1.45; }
+    .muted { color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .small { font-size: 12px; }
+    .card { margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .card > * + * { margin-top: 10px; }
+    .hidden { display: none !important; }
+    label { display: block; font-size: 13px; color: var(--muted); }
+    input[type=password], input[type=text] {
+      width: 100%; margin-top: 4px; padding: 10px 12px; font: inherit; font-size: 15px;
+      color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    }
+    label.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+    button { font: inherit; cursor: pointer; }
+    .primary {
+      width: 100%; padding: 12px; border: none; border-radius: 10px;
+      background: var(--accent); color: var(--on-accent); font-size: 16px; font-weight: 600;
+    }
+    .text { border: none; background: none; color: var(--accent); font-size: 14px; font-weight: 600; padding: 4px 0; }
+    .text.danger { color: var(--danger); }
+    .error { color: var(--danger); font-size: 14px; line-height: 1.4; min-height: 0; }
+    .error:empty { display: none; }
+    .linkrow { display: flex; align-items: center; gap: 12px; }
+    .linkrow code {
+      flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px; font-weight: 600;
+    }
+    .status { margin-top: 20px; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+    .dot.connected { background: var(--accent); }
+    .dot.connecting { background: var(--warn); animation: blink 1.2s infinite; }
+    .dot.disconnected { background: var(--danger); }
+    @keyframes blink { 50% { opacity: .35; } }
+    .status .spacer { flex: 1; }
+
+    /* The call */
+    .caller { display: flex; align-items: center; gap: 14px; }
+    .avatar {
+      position: relative; width: 56px; height: 56px; flex: none; border-radius: 50%;
+      background: var(--bg); border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 600;
+    }
+    .avatar.ringing::after {
+      content: ''; position: absolute; inset: -6px; border-radius: 50%;
+      border: 2px solid var(--accent); opacity: 0; animation: ring 1.6s ease-out infinite;
+    }
+    @keyframes ring { 0% { transform: scale(.92); opacity: .6; } 100% { transform: scale(1.18); opacity: 0; } }
+    .name { font-size: 20px; font-weight: 600; }
+    .trust { margin-top: 2px; font-size: 14px; color: var(--muted); }
+    .trust.verified { color: var(--accent); }
+    .trust.warning { color: var(--warn); font-weight: 600; }
+    .trustnote { font-size: 13px; color: var(--warn); line-height: 1.4; }
+    .trustnote:empty { display: none; }
+    .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; line-height: 1.4; }
+    .facts:empty { display: none; }
+    .facts dt { color: var(--muted); }
+    .facts a { color: var(--accent); }
+    .urgent { color: var(--danger); font-weight: 600; }
+    .callstatus { font-size: 15px; font-weight: 500; }
+    .directive { font-size: 13px; color: var(--muted); }
+    .directive:empty { display: none; }
+    .talk { padding: 10px 12px; border-radius: 10px; background: var(--soft); font-size: 15px; line-height: 1.45; }
+    .talk:empty { display: none; }
+    .talk p + p { margin-top: 6px; }
+    .talk .who { font-size: 12px; font-weight: 600; color: var(--muted); display: block; }
+    .controls { display: flex; justify-content: space-around; gap: 8px; padding-top: 6px; }
+    .control { display: flex; flex-direction: column; align-items: center; min-width: 64px; }
+    .round {
+      width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--line);
+      background: var(--bg); color: var(--text);
+      display: flex; align-items: center; justify-content: center; transition: transform .1s;
+    }
+    .round:active { transform: scale(.95); }
+    .round svg { width: 24px; height: 24px; fill: currentColor; }
+    .round.go { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .round.stop { background: var(--danger); color: #FFFFFF; border-color: var(--danger); }
+    .round[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    .control span { margin-top: 6px; font-size: 12px; color: var(--muted); }
+    .relay { display: flex; gap: 8px; }
+    .relay input { margin-top: 0; }
+    .relay button { flex: none; padding: 0 14px; border: none; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+    details summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+    .screening { margin-top: 8px; max-height: 220px; overflow-y: auto; font-size: 14px; line-height: 1.45; }
+    .screening p + p { margin-top: 4px; }
+    .strip { padding: 8px 12px; border-radius: 8px; border: 1px dashed var(--line); font-size: 14px; }
+    .strip:empty { display: none; }
+
+    /* Owner settings on the demo line */
+    .seg { display: flex; gap: 6px; flex-wrap: wrap; }
+    .seg button { padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 13px; }
+    .seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+    .item { padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
+    .item:first-child { border-top: none; padding-top: 0; }
+    .item .row { display: flex; align-items: baseline; gap: 8px; }
+    .item .row strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .item .when { color: var(--muted); font-size: 12px; flex: none; }
+    .item .sub { color: var(--muted); }
+    .item code { font-size: 12px; overflow-wrap: anywhere; }
+    footer { margin-top: 32px; font-size: 12px; color: var(--muted); line-height: 1.5; text-align: center; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">Awaaz</div>
+    <h1>Take your calls</h1>
+    <p class="lead">Your secretary answers every call first, then briefs you here. Talk to her, or put the caller through.</p>
+
+    <!-- Before starting -->
+    <section class="card" id="setup">
+      <div id="demoSetup" class="hidden">
+        <h2>How it works</h2>
+        <p class="muted">Start below, then open your link (under this box) on another device and press Call. It rings this page, and only this page. You play Kabeer.</p>
+      </div>
+      <div id="liveSetup" class="hidden">
+        <h2>Your line</h2>
+        <label for="secret">Gateway secret
+          <input id="secret" type="password" autocomplete="current-password" placeholder="The one in your phone's Settings">
+        </label>
+        <label class="check"><input id="remember" type="checkbox"> Remember on this device</label>
+        <p class="muted small">Anyone with the secret can take your calls. If your phone is connected too, both ring: answer on one.</p>
+      </div>
+      <button class="primary" id="btnStart" onclick="start()">Start taking calls</button>
+      <p class="muted small">Uses your microphone and speaker. Headphones stop your secretary hearing herself.</p>
+      <p class="error" id="setupError"></p>
+    </section>
+
+    <!-- The link to call, for both lines -->
+    <section class="card hidden" id="linkCard">
+      <h2 id="linkTitle">Your call link</h2>
+      <div class="linkrow">
+        <code id="callLink"></code>
+        <button class="text" onclick="copyText(callLink(), this)">Copy</button>
+        <button class="text hidden" id="btnShare" onclick="shareLink()">Share</button>
+      </div>
+    </section>
+
+    <!-- Connection -->
+    <div class="status hidden" id="statusBar">
+      <span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span>
+      <span class="spacer"></span>
+      <button class="text" onclick="stop()">Stop</button>
+    </div>
+    <p class="error" id="runtimeNote"></p>
+
+    <!-- The call on screen -->
+    <section class="card hidden" id="callPanel">
+      <div class="caller">
+        <div class="avatar" id="avatar">?</div>
+        <div>
+          <div class="name" id="callerName">Someone is calling</div>
+          <div class="trust" id="trustLine">Not verified</div>
+        </div>
+      </div>
+      <p class="trustnote" id="trustNote"></p>
+      <dl class="facts" id="facts"></dl>
+      <div class="callstatus" id="callStatus"></div>
+      <div class="directive" id="directive"></div>
+      <div class="talk" id="talk"></div>
+      <div class="controls" id="controls"></div>
+      <div class="relay hidden" id="relayBox">
+        <input type="text" id="relayText" placeholder="What should she tell them?" maxlength="300"
+               onkeydown="if (event.key === 'Enter') sendRelay()">
+        <button onclick="sendRelay()">Send</button>
+      </div>
+      <div id="extraActions"></div>
+      <div class="strip" id="waitingStrip"></div>
+      <details id="screeningBox">
+        <summary>What the caller said</summary>
+        <div class="screening" id="screening"></div>
+      </details>
+    </section>
+
+    <!-- Demo line: the owner's settings live in this browser -->
+    <section class="card hidden" id="ownerCard">
+      <h2>You</h2>
+      <div>
+        <label>Availability</label>
+        <div class="seg" id="availability" style="margin-top:6px">
+          <button data-mode="available" onclick="setAvailability('available')">Available</button>
+          <button data-mode="busy" onclick="setAvailability('busy')">Busy for 30 min</button>
+          <button data-mode="dnd" onclick="setAvailability('dnd')">Do not disturb</button>
+        </div>
+        <p class="muted small" id="availabilityNote" style="margin-top:6px"></p>
+      </div>
+      <div>
+        <label for="linkName">Personal links: a caller who uses theirs shows as verified</label>
+        <div class="relay" style="margin-top:6px">
+          <input type="text" id="linkName" placeholder="Their name, e.g. Maria Lopez" maxlength="80"
+                 onkeydown="if (event.key === 'Enter') addLink()">
+          <button onclick="addLink()">Create</button>
+        </div>
+      </div>
+      <div id="links"></div>
+      <div id="blocked"></div>
+    </section>
+    <p class="muted small hidden" id="liveOwnerNote" style="margin-top:12px">Availability, personal links and blocking are set in the phone app.</p>
+
+    <!-- History in this browser -->
+    <section class="card hidden" id="history">
+      <div class="row" style="display:flex;align-items:baseline">
+        <h2 style="flex:1">Recent calls</h2>
+        <button class="text" onclick="clearRecords()">Clear</button>
+      </div>
+      <div id="records"></div>
+    </section>
+
+    <footer>
+      Calls ring here only while this page is open, so keep it in front.<br>
+      Callers use <a href="/" id="callerPageLink">the call page</a>.
+    </footer>
+  </main>
+
+  <script>
+    'use strict';
+
+    // ---------- Small helpers ----------
+    const $ = (id) => document.getElementById(id);
+    const store = {
+      get(key, fallback) {
+        try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch (_) { return fallback; }
+      },
+      set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {} },
+      del(key) { try { localStorage.removeItem(key); } catch (_) {} },
+    };
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    function randomCode(length) {
+      const values = new Uint32Array(length);
+      crypto.getRandomValues(values);
+      return Array.from(values, v => ALPHABET[v % ALPHABET.length]).join('');
+    }
+    const timeLabel = (date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/ /g, ' ');
+    const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    const initial = (name) => (String(name || '?').trim()[0] || '?').toUpperCase();
+
+    const ICONS = {
+      phone: '<path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>',
+      end: '<path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 0 1-.29-.7c0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.27 11.27 0 0 0-2.67-1.85.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>',
+      mic: '<path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>',
+      hold: '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>',
+      message: '<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>',
+      connect: '<path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/>',
+    };
+
+    // ---------- State ----------
+    const S = {
+      mode: null,           // 'demo' (line code, no secret) or 'live' (the gateway secret)
+      line: '',
+      secret: '',
+      ws: null,
+      registered: false,
+      authFailed: false,
+      stopped: true,
+      retry: 0,
+      audioCtx: null,
+      micStream: null,
+      micNode: null,
+      muted: false,
+      playbackTime: 0,
+      sources: [],
+      call: null,           // the call on screen
+      others: new Map(),    // callId -> waiting callers, and calls you ended whose caller is still talking
+      owner: { availability: { mode: 'available' }, links: [], blocked: [] },
+    };
+
+    // ---------- Setup ----------
+    const callLink = () => S.mode === 'demo' ? `${location.origin}/?line=${S.line}` : `${location.origin}/`;
+    const personalLink = (token) => S.mode === 'demo'
+      ? `${location.origin}/?line=${S.line}&from=${token}`
+      : `${location.origin}/?from=${token}`;
+
+    async function init() {
+      if (!window.isSecureContext) {
+        setupError('This page needs a secure (https) connection to use your microphone.');
+      }
+      try {
+        const health = await (await fetch('/health', { cache: 'no-store' })).json();
+        S.mode = health.demoMode ? 'demo' : 'live';
+      } catch (_) {
+        setupError('Could not reach Awaaz. Check your connection, then reload the page.');
+        $('btnStart').disabled = true;
+        return;
+      }
+      if (S.mode === 'demo') {
+        S.line = store.get('awaaz_owner_line', '');
+        if (!/^[A-Z0-9]{6,12}$/.test(S.line)) {
+          S.line = randomCode(6);
+          store.set('awaaz_owner_line', S.line);
+        }
+        S.owner = store.get('awaaz_owner_settings', S.owner);
+        $('demoSetup').classList.remove('hidden');
+        $('linkTitle').textContent = `Your demo line: ${S.line}`;
+      } else {
+        const saved = store.get('awaaz_owner_secret', '');
+        if (saved) { $('secret').value = saved; $('remember').checked = true; }
+        $('liveSetup').classList.remove('hidden');
+      }
+      $('callLink').textContent = callLink();
+      $('callerPageLink').href = callLink();
+      $('linkCard').classList.remove('hidden');
+      if (navigator.share) $('btnShare').classList.remove('hidden');
+      renderRecords();
+    }
+
+    async function start() {
+      setupError('');
+      if (S.mode === 'live') {
+        const secret = $('secret').value.trim();
+        if (!secret) { setupError('Enter your gateway secret first.'); return; }
+        S.secret = secret;
+        if ($('remember').checked) store.set('awaaz_owner_secret', secret); else store.del('awaaz_owner_secret');
+      }
+      // Browsers only allow sound and the microphone after a click: set both up now
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (!S.audioCtx) S.audioCtx = new AudioCtxClass();
+      const resumed = S.audioCtx.resume();
+      note('');
+      if (!S.micStream) {
+        try {
+          S.micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+        } catch (err) {
+          S.micStream = null;
+          note(err && err.name === 'NotAllowedError'
+            ? "The microphone is blocked, so your secretary can't hear you. Allow it for this site, then press Stop and Start."
+            : "Your microphone couldn't be started, so your secretary can't hear you. You can still use the buttons.");
+        }
+      }
+      await resumed;
+      if (S.micStream && !S.micNode) {
+        try {
+          if (!S.workletLoaded) {
+            await S.audioCtx.audioWorklet.addModule('/pcm-processor.js');
+            S.workletLoaded = true;
+          }
+          const source = S.audioCtx.createMediaStreamSource(S.micStream);
+          S.micNode = new AudioWorkletNode(S.audioCtx, 'pcm-processor', {
+            processorOptions: { inputSampleRate: S.audioCtx.sampleRate, targetSampleRate: 24000, chunkSamples: 1200 },
+          });
+          // Raw PCM16 at 24 kHz, the same frames the phone app sends
+          S.micNode.port.onmessage = (e) => { if (micWanted()) S.ws.send(e.data); };
+          source.connect(S.micNode).connect(S.audioCtx.destination);
+        } catch (_) {
+          note("Your microphone couldn't be started, so your secretary can't hear you. You can still use the buttons.");
+        }
+      }
+      S.playbackTime = S.audioCtx.currentTime;
+      S.stopped = false;
+      S.authFailed = false;
+      $('setup').classList.add('hidden');
+      $('statusBar').classList.remove('hidden');
+      if (S.mode === 'demo') $('ownerCard').classList.remove('hidden');
+      else $('liveOwnerNote').classList.remove('hidden');
+      connect();
+      keepAwake();
+      render();
+    }
+
+    function stop() {
+      S.stopped = true;
+      if (S.call) finishCall('Stopped', S.call.state === 'bridged' ? 'talked' : 'ended', { quietly: true });
+      if (S.ws) { try { S.ws.close(); } catch (_) {} }
+      S.ws = null;
+      S.registered = false;
+      if (S.micStream) S.micStream.getTracks().forEach(t => t.stop());
+      S.micStream = null;
+      if (S.micNode) { try { S.micNode.disconnect(); } catch (_) {} }
+      S.micNode = null;
+      releaseWakeLock();
+      $('statusBar').classList.add('hidden');
+      $('ownerCard').classList.add('hidden');
+      $('liveOwnerNote').classList.add('hidden');
+      $('setup').classList.remove('hidden');
+      render();
+    }
+
+    // ---------- Connection to the gateway ----------
+    function connect() {
+      if (S.stopped) return;
+      setStatus('connecting', 'Connecting…');
+      const ws = new WebSocket(location.origin.replace(/^http/, 'ws'));
+      ws.binaryType = 'arraybuffer';
+      S.ws = ws;
+      ws.onopen = () => {
+        ws.send(JSON.stringify(S.mode === 'demo'
+          ? { type: 'REGISTER_MOBILE', line: S.line }
+          : { type: 'REGISTER_MOBILE', authSecret: S.secret }));
+      };
+      ws.onmessage = (event) => {
+        if (typeof event.data !== 'string') { onAudio(event.data); return; }
+        let msg;
+        try { msg = JSON.parse(event.data); } catch (_) { return; }
+        onMessage(msg);
+      };
+      ws.onclose = () => {
+        if (S.ws !== ws) return;
+        S.registered = false;
+        // The gateway ends a secretary session or a bridge whose owner left
+        if (S.call) {
+          if (S.call.state === 'bridged' || S.call.state === 'patched') finishCall('The connection dropped', 'talked');
+          else if (S.call.voice !== 'off') S.call.voice = 'ended';
+        }
+        if (S.stopped || S.authFailed) return;
+        setStatus('disconnected', 'Reconnecting…');
+        const delay = Math.min(10000, 1000 * 2 ** S.retry++);
+        setTimeout(connect, delay);
+        render();
+      };
+      ws.onerror = () => {};
+    }
+
+    function send(payload) {
+      if (S.ws && S.ws.readyState === WebSocket.OPEN) S.ws.send(JSON.stringify(payload));
+    }
+
+    function micWanted() {
+      const c = S.call;
+      if (!c || S.muted || !S.registered || !S.ws || S.ws.readyState !== WebSocket.OPEN) return false;
+      return c.state === 'bridged' || ['connecting', 'listening', 'speaking'].includes(c.voice);
+    }
+
+    function onMessage(msg) {
+      switch (msg.type) {
+        case 'REGISTERED_SUCCESS':
+          S.registered = true;
+          S.retry = 0;
+          setStatus('connected', 'Waiting for calls');
+          sendOwnerSettings();
+          break;
+        case 'AUTH_FAILED':
+          S.authFailed = true;
+          setStatus('disconnected', 'Not connected');
+          stop();
+          setupError(S.mode === 'live' ? 'That secret was not accepted. Check it in your phone app\'s Settings.' : (msg.error || 'This line could not connect.'));
+          break;
+        case 'INCOMING_CALL': onIncoming(msg); break;
+        case 'CALLER_DETAILS': onDetails(msg); break;
+        case 'TRANSCRIPT_UPDATE': onScreening(msg); break;
+        case 'TAKING_MESSAGE':
+          if (isCurrent(msg)) { stopRing(); S.call.takingMessage = true; render(); }
+          break;
+        case 'DIRECTIVE_STATE':
+        case 'DIRECTIVE_FAILED':
+          onDirectiveReport(msg);
+          break;
+        case 'MASTER_SESSION_STATE':
+          if (isCurrent(msg)) {
+            S.call.voice = msg.state || 'ended';
+            S.call.voiceError = msg.error || '';
+            render();
+          }
+          break;
+        case 'MASTER_TRANSCRIPT':
+          if (isCurrent(msg) && msg.text) {
+            S.call.talk.push({ speaker: msg.speaker === 'Master' ? 'You' : 'Your secretary', text: msg.text });
+            render();
+          }
+          break;
+        case 'MASTER_AUDIO_FLUSH':
+          // You talked over your secretary: drop the rest of what she was saying
+          if (isCurrent(msg)) stopPlayback();
+          break;
+        case 'MASTER_COMMAND':
+          if (isCurrent(msg)) runVoiceCommand(msg);
+          break;
+        case 'BRIDGE_CONNECTED':
+          if (isCurrent(msg) && S.call.state === 'patched') {
+            S.call.state = 'bridged';
+            S.call.voice = 'ended';
+            S.muted = false;
+            render();
+          }
+          break;
+        case 'CALLER_HUNG_UP': onHungUp(msg); break;
+        case 'SESSION_EXPIRED':
+          if (isCurrent(msg)) finishCall('The call reached its 10-minute limit', S.call.state === 'bridged' ? 'talked' : 'ended');
+          break;
+        case 'MISSED_CALLS':
+          // On the live line these belong to the phone app, which files them
+          if (S.mode === 'demo') importMissedCalls(msg.calls || []);
+          break;
+        default:
+          break;
+      }
+    }
+
+    const isCurrent = (msg) => Boolean(S.call && msg.callId === S.call.callId);
+    const findCall = (callId) => (S.call && S.call.callId === callId) ? S.call : S.others.get(callId);
+
+    // ---------- Calls ----------
+    function newCall(msg) {
+      return {
+        callId: msg.callId,
+        startedAt: Date.now(),
+        device: msg.device || '',
+        verified: msg.verified && msg.verified.name ? msg.verified : null,
+        staleLink: msg.staleLink === true,
+        quiet: msg.quiet || '',
+        details: { ...(msg.details || {}) },
+        screening: [],
+        talk: [],
+        tasks: [],
+        state: 'ringing',
+        voice: 'off',
+        voiceError: '',
+        version: 0,
+        directive: '',
+        directiveStatus: '',
+        holdUntil: 0,
+        holdTimer: null,
+        takingMessage: false,
+        outcome: '',
+        contextSignature: '',
+        trust: null,
+        hungUp: false,
+      };
+    }
+
+    function onIncoming(msg) {
+      if (!msg.callId) return;
+      const known = findCall(msg.callId);
+      if (known) {
+        // Replayed after a reconnect: keep what we have, add what's new
+        Object.assign(known.details, msg.details || {});
+        refreshTrust(known);
+        render();
+        return;
+      }
+      const call = newCall(msg);
+      if (S.call) {
+        // You're on a call: this one waits, and the secretary keeps screening it
+        call.state = 'waiting';
+        S.others.set(call.callId, call);
+        refreshTrust(call);
+        chime();
+        render();
+        return;
+      }
+      showCall(call);
+    }
+
+    function showCall(call) {
+      S.call = call;
+      if (call.quiet) {
+        call.state = 'quiet';
+      } else {
+        call.state = 'ringing';
+        startRing();
+      }
+      refreshTrust(call);
+      render();
+    }
+
+    function onDetails(msg) {
+      const call = findCall(msg.callId);
+      if (!call) return;
+      for (const key of ['name', 'company', 'reason', 'urgent', 'message', 'callbackNumber', 'callbackEmail', 'bestTime']) {
+        if (msg[key] !== undefined && msg[key] !== null && msg[key] !== '') call.details[key] = msg[key];
+      }
+      refreshTrust(call);
+      if (call.state === 'ended') saveRecord(call);
+      render();
+    }
+
+    function onScreening(msg) {
+      const call = findCall(msg.callId);
+      if (!call || !msg.text) return;
+      call.screening.push({ speaker: msg.speaker === 'Secretary' ? 'Secretary' : 'Caller', text: msg.text });
+      if (call.screening.length > 80) call.screening.shift();
+      if (call === S.call) renderScreening();
+    }
+
+    function onDirectiveReport(msg) {
+      const call = S.call;
+      if (!call || msg.callId !== call.callId) return;
+      // A late report about an older instruction must not overwrite the newest one
+      if (msg.version && msg.version !== call.version) return;
+      if (msg.type === 'DIRECTIVE_STATE') {
+        call.directiveStatus = msg.state || 'spoken';
+      } else {
+        call.directiveStatus = 'failed';
+        call.directiveError = msg.reason || 'unknown';
+      }
+      render();
+    }
+
+    function onHungUp(msg) {
+      if (isCurrent(msg)) {
+        const call = S.call;
+        call.hungUp = true;
+        const talked = call.state === 'bridged' || call.state === 'patched';
+        finishCall(talked ? 'Call ended' : 'The caller hung up', talked ? 'talked' : (call.takingMessage ? 'message' : 'hungUp'));
+        return;
+      }
+      const call = S.others.get(msg.callId);
+      if (!call) return;
+      S.others.delete(msg.callId);
+      call.hungUp = true;
+      if (call.state === 'waiting') {
+        call.state = 'ended';
+        call.endedAt = Date.now();
+        call.outcome = 'waited';
+      }
+      saveRecord(call);
+      summarise(call);
+      render();
+    }
+
+    // What the caller hears is up to the secretary; these tell her what to do
+    function directive(action, extra) {
+      const call = S.call;
+      if (!call) return;
+      call.version += 1;
+      send({ type: 'MASTER_DIRECTIVE', data: { callId: call.callId, action, directiveVersion: call.version, ...(extra || {}) } });
+      call.directiveStatus = 'sending';
+      call.directiveError = '';
+    }
+
+    function answer() {
+      const call = S.call;
+      if (!call) return;
+      stopRing();
+      if (call.state === 'ringing' || call.state === 'quiet') call.state = 'answered';
+      startVoice();
+    }
+
+    function startVoice() {
+      const call = S.call;
+      if (!call || !S.registered) return;
+      send({ type: 'MASTER_SESSION_START', callId: call.callId });
+      call.voice = 'connecting';
+      call.voiceError = '';
+      render();
+    }
+
+    function putThrough() {
+      const call = S.call;
+      if (!call || call.state === 'patched' || call.state === 'bridged') return;
+      stopRing();
+      clearHold(call);
+      directive('patchedToMaster');
+      call.state = 'patched';
+      call.directive = 'Connecting you';
+      render();
+    }
+
+    function hold(minutes) {
+      const call = S.call;
+      if (!call || call.state === 'patched' || call.state === 'bridged') return;
+      stopRing();
+      clearHold(call);
+      minutes = Math.min(30, Math.max(1, Math.round(Number(minutes) || 2)));
+      directive('holding', { holdMinutes: minutes });
+      call.state = 'holding';
+      call.holdUntil = Date.now() + minutes * 60000;
+      call.directive = `Asked to hold for ${minutes} min`;
+      call.holdTimer = setInterval(() => {
+        if (S.call !== call || call.state !== 'holding') { clearHold(call); return; }
+        if (Date.now() >= call.holdUntil) {
+          // Connecting now could reach nobody: the secretary checks in instead
+          clearHold(call);
+          directive('checkIn');
+          call.state = 'answered';
+          call.directive = 'Hold time is up: your secretary is checking in with the caller';
+          chime();
+          render();
+          return;
+        }
+        // Only the countdown changes; redrawing the buttons could swallow a click
+        $('callStatus').textContent = statusLine(call);
+      }, 500);
+      render();
+    }
+
+    function clearHold(call) {
+      clearInterval(call.holdTimer);
+      call.holdTimer = null;
+    }
+
+    function relay(text, { spoken } = {}) {
+      const call = S.call;
+      text = String(text || '').trim();
+      if (!call || !text) return;
+      stopRing();
+      directive('custom', { spokenDirective: text });
+      call.directive = `Asked her to tell them: “${text}”`;
+      // A spoken instruction is already in the conversation as your own words
+      if (!spoken) call.talk.push({ speaker: 'You', text });
+      if (call.state === 'ringing' || call.state === 'quiet') call.state = 'answered';
+      render();
+    }
+
+    function sendRelay() {
+      const input = $('relayText');
+      relay(input.value);
+      input.value = '';
+      $('relayBox').classList.add('hidden');
+    }
+
+    function toggleRelay() {
+      const box = $('relayBox');
+      box.classList.toggle('hidden');
+      if (!box.classList.contains('hidden')) $('relayText').focus();
+    }
+
+    // "End": the secretary tells them you'll get back to them, takes a number, and says goodbye
+    function endCall(outcome) {
+      const call = S.call;
+      if (!call) return;
+      if (call.state === 'bridged' || call.state === 'patched') { hangUp(); return; }
+      directive('declined');
+      finishCall('Your secretary is taking a message', outcome || 'message');
+    }
+
+    function hangUp() {
+      const call = S.call;
+      if (!call) return;
+      directive('hangup');
+      finishCall('Call ended', 'talked');
+    }
+
+    function toggleMute() {
+      S.muted = !S.muted;
+      render();
+    }
+
+    // Your spoken decisions run the same code as the buttons
+    function runVoiceCommand(msg) {
+      const call = S.call;
+      switch (msg.command) {
+        case 'connect': putThrough(); break;
+        case 'hold': hold(msg.minutes); break;
+        case 'relay': if (msg.message) relay(msg.message, { spoken: true }); break;
+        case 'task': {
+          if (!msg.task) break;
+          const task = { text: String(msg.task), due: msg.due || '' };
+          if (msg.replacesPrevious && call.tasks.length) call.tasks[call.tasks.length - 1] = task;
+          else call.tasks.push(task);
+          render();
+          break;
+        }
+        case 'end': endCall(); break;
+        default: break;
+      }
+    }
+
+    function finishCall(reason, outcome, { quietly } = {}) {
+      const call = S.call;
+      if (!call) return;
+      stopRing();
+      stopPlayback();
+      clearHold(call);
+      if (['connecting', 'listening', 'speaking'].includes(call.voice)) send({ type: 'MASTER_SESSION_STOP', callId: call.callId });
+      call.voice = 'ended';
+      call.state = 'ended';
+      call.endedAt = Date.now();
+      call.outcome = outcome || call.outcome || 'ended';
+      saveRecord(call);
+      if (call.hungUp) summarise(call);
+      // The caller may still be leaving a number: keep listening for it
+      else S.others.set(call.callId, call);
+      S.call = null;
+      S.muted = false;
+      if (!quietly) flashEnded(call, reason);
+      // A caller who waited comes up next
+      const next = [...S.others.values()].find(c => c.state === 'waiting' && !c.hungUp);
+      if (next) {
+        S.others.delete(next.callId);
+        setTimeout(() => { if (!S.call) showCall(next); else S.others.set(next.callId, next); }, 1200);
+      }
+      render();
+    }
+
+    let endedFlash = null;
+    function flashEnded(call, reason) {
+      endedFlash = { name: call.details.name || (call.verified && call.verified.name) || 'The caller', reason };
+      setTimeout(() => { endedFlash = null; render(); }, 2500);
+    }
+
+    // ---------- Who is really calling (same rules as the app) ----------
+    const PLACEHOLDER_NAMES = new Set(['web caller', 'unknown caller', '']);
+    const normName = (name) => String(name || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    function sameName(a, b) {
+      const x = normName(a), y = normName(b);
+      if (!x || !y) return false;
+      if (x === y) return true;
+      const [shorter, longer] = x.length <= y.length ? [x, y] : [y, x];
+      return (shorter.length >= 3 && longer.split(' ').includes(shorter)) || (shorter.length >= 4 && longer.startsWith(shorter));
+    }
+
+    function earlierNames(device) {
+      if (!device) return [];
+      const names = [];
+      for (const r of records()) {
+        if (r.device !== device) continue;
+        const name = String(r.name || '').trim();
+        if (PLACEHOLDER_NAMES.has(name.toLowerCase())) continue;
+        if (!names.some(n => sameName(n, name))) names.push(name);
+      }
+      return names;
+    }
+
+    function refreshTrust(call) {
+      const claimed = String(call.details.name || '').trim();
+      const hasClaim = !PLACEHOLDER_NAMES.has(claimed.toLowerCase());
+      let trust;
+      if (call.verified) {
+        // Only a personal link verifies a caller
+        const warnings = hasClaim && !sameName(claimed, call.verified.name)
+          ? [`Gives the name "${claimed}", but called through ${call.verified.name}'s personal link`]
+          : [];
+        trust = {
+          level: warnings.length ? 'warning' : 'verified',
+          label: warnings.length ? 'Warning' : `Verified · via ${call.verified.name}'s link`,
+          warnings,
+        };
+      } else {
+        const warnings = [];
+        if (call.staleLink) warnings.push('Called through an old or unknown personal link');
+        const earlier = earlierNames(call.device);
+        const consistent = hasClaim && earlier.some(n => sameName(n, claimed));
+        if (hasClaim && earlier.length && !consistent) warnings.push(`This browser called before as ${earlier.slice(0, 3).join(', ')}`);
+        trust = {
+          level: warnings.length ? 'warning' : consistent ? 'recognised' : 'unverified',
+          label: warnings.length ? 'Warning' : consistent ? 'Not verified · called before from this browser' : 'Not verified',
+          warnings,
+        };
+      }
+      call.trust = trust;
+      // On the live line the phone app, which knows your contacts, tells your secretary
+      if (S.mode === 'demo' && call.state !== 'ended') {
+        const context = { type: 'CALLER_CONTEXT', callId: call.callId, trust: trust.level, nameMatch: '', warnings: trust.warnings };
+        const signature = JSON.stringify(context);
+        if (signature !== call.contextSignature) {
+          call.contextSignature = signature;
+          send(context);
+        }
+      }
+    }
+
+    // ---------- Sound ----------
+    function onAudio(buffer) {
+      const call = S.call;
+      if (!call || !S.audioCtx) return;
+      if (call.state !== 'bridged' && !['connecting', 'listening', 'speaking'].includes(call.voice)) return;
+      schedulePcm16(new Uint8Array(buffer), call.state === 'bridged');
+    }
+
+    // Plays little-endian PCM16 mono at 24 kHz: your secretary, or the caller on the bridge
+    function schedulePcm16(bytes, bridged) {
+      const ctx = S.audioCtx;
+      if (bytes.length < 2) return;
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length - (bytes.length % 2));
+      const samples = new Float32Array(view.byteLength / 2);
+      for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+      const audioBuffer = ctx.createBuffer(1, samples.length, 24000);
+      audioBuffer.getChannelData(0).set(samples);
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(ctx.destination);
+      // A small lead so network jitter on the live bridge doesn't cause gaps
+      const now = ctx.currentTime;
+      if (S.playbackTime < now) S.playbackTime = now + (bridged ? 0.08 : 0);
+      src.start(S.playbackTime);
+      S.playbackTime += audioBuffer.duration;
+      S.sources.push(src);
+      src.onended = () => { S.sources = S.sources.filter(s => s !== src); };
+    }
+
+    function stopPlayback() {
+      for (const s of S.sources) { try { s.stop(); } catch (_) {} }
+      S.sources = [];
+      if (S.audioCtx) S.playbackTime = S.audioCtx.currentTime;
+    }
+
+    function tone(freq, at, length, level) {
+      const ctx = S.audioCtx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(level, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + length + 0.02);
+    }
+
+    let ringTimer = null;
+    let titleTimer = null;
+    function ringOnce() {
+      if (!S.audioCtx) return;
+      const t = S.audioCtx.currentTime;
+      [[0, 880], [0.28, 660], [0.56, 880], [0.84, 660]].forEach(([at, f]) => tone(f, t + at, 0.24, 0.2));
+      if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
+    }
+    function startRing() {
+      stopRing();
+      ringOnce();
+      ringTimer = setInterval(ringOnce, 3000);
+      let on = false;
+      titleTimer = setInterval(() => { on = !on; document.title = on ? 'Incoming call · Awaaz' : 'Take your calls · Awaaz'; }, 1000);
+    }
+    function stopRing() {
+      clearInterval(ringTimer);
+      clearInterval(titleTimer);
+      ringTimer = titleTimer = null;
+      document.title = 'Take your calls · Awaaz';
+      if (navigator.vibrate) navigator.vibrate(0);
+    }
+    function chime() {
+      if (!S.audioCtx) return;
+      const t = S.audioCtx.currentTime;
+      tone(740, t, 0.3, 0.15);
+      tone(988, t + 0.18, 0.4, 0.15);
+    }
+
+    // Keeps a phone's screen on while the page waits for calls
+    let wakeLock = null;
+    async function keepAwake() {
+      try {
+        if ('wakeLock' in navigator && document.visibilityState === 'visible' && !S.stopped) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (_) {}
+    }
+    function releaseWakeLock() {
+      try { if (wakeLock) wakeLock.release(); } catch (_) {}
+      wakeLock = null;
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || S.stopped) return;
+      keepAwake();
+      if (S.audioCtx && S.audioCtx.state !== 'running') S.audioCtx.resume().catch(() => {});
+    });
+
+    // ---------- The owner's settings (demo line only) ----------
+    // On the live line these come from the phone app; sending them from here
+    // would overwrite the phone's availability, links and blocked callers.
+    function sendOwnerSettings() {
+      if (S.mode !== 'demo' || !S.registered) return;
+      send({
+        type: 'OWNER_SETTINGS',
+        availability: S.owner.availability,
+        links: S.owner.links.map(l => ({ token: l.token, name: l.name, alwaysRing: l.alwaysRing === true, neverRing: false })),
+        blockedDevices: S.owner.blocked.map(b => b.device),
+      });
+    }
+    function saveOwner() {
+      store.set('awaaz_owner_settings', S.owner);
+      sendOwnerSettings();
+      render();
+    }
+    function awayNow() {
+      const a = S.owner.availability;
+      if (a.mode === 'available') return false;
+      return !a.until || Date.parse(a.until) > Date.now();
+    }
+    function setAvailability(mode) {
+      if (mode === 'busy') {
+        const until = new Date(Date.now() + 30 * 60000);
+        S.owner.availability = { mode: 'busy', until: until.toISOString(), untilLabel: timeLabel(until), note: '' };
+      } else if (mode === 'dnd') {
+        S.owner.availability = { mode: 'dnd' };
+      } else {
+        S.owner.availability = { mode: 'available' };
+      }
+      saveOwner();
+    }
+    function addLink() {
+      const input = $('linkName');
+      const name = input.value.trim();
+      if (!name) return;
+      S.owner.links.push({ name, token: randomCode(10), alwaysRing: false });
+      input.value = '';
+      saveOwner();
+    }
+    function revokeLink(token) {
+      S.owner.links = S.owner.links.filter(l => l.token !== token);
+      saveOwner();
+    }
+    function toggleAlwaysRing(token) {
+      const link = S.owner.links.find(l => l.token === token);
+      if (link) link.alwaysRing = !link.alwaysRing;
+      saveOwner();
+    }
+    function blockAndEnd() {
+      const call = S.call;
+      if (!call || !call.device) return;
+      if (!S.owner.blocked.some(b => b.device === call.device)) {
+        S.owner.blocked.push({ device: call.device, name: call.details.name || '' });
+      }
+      saveOwner();
+      endCall('blocked');
+    }
+    function unblock(device) {
+      S.owner.blocked = S.owner.blocked.filter(b => b.device !== device);
+      saveOwner();
+    }
+
+    // ---------- Records, kept in this browser ----------
+    const records = () => store.get('awaaz_owner_calls', []);
+    function saveRecord(call) {
+      const list = records().filter(r => r.callId !== call.callId);
+      const previous = records().find(r => r.callId === call.callId) || {};
+      list.unshift({
+        ...previous,
+        callId: call.callId,
+        name: call.details.name || (call.verified && call.verified.name) || '',
+        company: call.details.company || '',
+        reason: call.details.reason || '',
+        urgent: call.details.urgent === true,
+        message: call.details.message || '',
+        callbackNumber: call.details.callbackNumber || '',
+        callbackEmail: call.details.callbackEmail || '',
+        bestTime: call.details.bestTime || '',
+        device: call.device,
+        trust: call.trust ? call.trust.label : '',
+        startedAt: call.startedAt,
+        endedAt: call.endedAt || Date.now(),
+        outcome: call.outcome,
+        tasks: call.tasks,
+      });
+      store.set('awaaz_owner_calls', list.slice(0, 30));
+      renderRecords();
+    }
+    function updateRecord(callId, patch) {
+      const list = records().map(r => r.callId === callId ? { ...r, ...patch } : r);
+      store.set('awaaz_owner_calls', list);
+      renderRecords();
+    }
+    function clearRecords() {
+      store.del('awaaz_owner_calls');
+      renderRecords();
+    }
+
+    // The same AI summary the phone app shows, once the caller has gone
+    async function summarise(call) {
+      const transcript = [
+        ...call.screening,
+        ...call.talk.filter(t => t.speaker === 'You').map(t => ({ speaker: 'Master', text: t.text })),
+      ];
+      if (!transcript.length) return;
+      const headers = { 'Content-Type': 'application/json' };
+      if (S.mode === 'demo') headers['X-Awaaz-Line'] = S.line; else headers['X-Awaaz-Secret'] = S.secret;
+      try {
+        const res = await fetch('/api/analyze-call', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            transcript,
+            caller: { name: call.details.name || '', company: call.details.company || '', reason: call.details.reason || '' },
+          }),
+        });
+        if (!res.ok) return;
+        const analysis = await res.json();
+        updateRecord(call.callId, { summary: analysis.summary || '', actionItem: analysis.actionItem || '' });
+      } catch (_) {}
+    }
+
+    // Calls that ended while this page was closed (demo line only)
+    function importMissedCalls(calls) {
+      const known = new Set(records().map(r => r.callId));
+      for (const raw of calls) {
+        if (!raw || !raw.callId) continue;
+        if (!known.has(raw.callId) && !(S.call && S.call.callId === raw.callId)) {
+          const d = raw.details || {};
+          const list = records();
+          list.unshift({
+            callId: raw.callId,
+            name: d.name || (raw.verified && raw.verified.name) || '',
+            company: d.company || '', reason: d.reason || '', urgent: d.urgent === true,
+            message: d.message || '', callbackNumber: d.callbackNumber || '', callbackEmail: d.callbackEmail || '',
+            bestTime: d.bestTime || '', device: raw.device || '',
+            trust: raw.verified && raw.verified.name ? `Verified · via ${raw.verified.name}'s link` : 'Not verified',
+            startedAt: Date.parse(raw.startedAt) || Date.now(), endedAt: Date.parse(raw.endedAt) || Date.now(),
+            outcome: raw.tookMessage ? 'message' : 'missed', tasks: [],
+          });
+          store.set('awaaz_owner_calls', list.slice(0, 30));
+        }
+        send({ type: 'CALL_LOGGED', callId: raw.callId });
+      }
+      renderRecords();
+    }
+
+    // ---------- Rendering ----------
+    function setStatus(kind, text) {
+      $('statusDot').className = `dot ${kind}`;
+      $('statusText').textContent = text;
+    }
+    function setupError(text) { $('setupError').textContent = text; }
+    function note(text) { $('runtimeNote').textContent = text; }
+
+    function copyText(text, button) {
+      const done = () => { const old = button.textContent; button.textContent = 'Copied'; setTimeout(() => { button.textContent = old; }, 1500); };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, () => {});
+      else {
+        const area = document.createElement('textarea');
+        area.value = text; document.body.appendChild(area); area.select();
+        try { document.execCommand('copy'); done(); } catch (_) {}
+        area.remove();
+      }
+    }
+    function shareLink() {
+      navigator.share({ title: 'Call me', text: 'Call me through my secretary:', url: callLink() }).catch(() => {});
+    }
+
+    function button(icon, label, onclick, kind, pressed) {
+      return `<div class="control"><button class="round ${kind || ''}" onclick="${onclick}" aria-label="${esc(label)}"` +
+        `${pressed === undefined ? '' : ` aria-pressed="${pressed}"`}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[icon]}</svg></button>` +
+        `<span>${esc(label)}</span></div>`;
+    }
+
+    function voiceLine(call) {
+      switch (call.voice) {
+        case 'connecting': return 'Connecting your secretary…';
+        case 'listening': return 'Your secretary is listening';
+        case 'speaking': return 'Your secretary is speaking';
+        case 'error': return `Your secretary couldn't join${call.voiceError ? ` (${call.voiceError.replace(/_/g, ' ')})` : ''}`;
+        case 'ended': return 'Your secretary has stepped out';
+        default: return 'Your secretary is answering';
+      }
+    }
+
+    function statusLine(call) {
+      const name = call.details.name || 'the caller';
+      if (call.state === 'bridged') return `On the call with ${name}`;
+      if (call.state === 'patched') return 'Connecting you…';
+      if (call.state === 'holding') {
+        const left = Math.max(0, Math.round((call.holdUntil - Date.now()) / 1000));
+        return `On hold · ${clock(left)} left`;
+      }
+      if (call.takingMessage) return 'Your secretary is taking a message for you';
+      if (call.state === 'quiet') {
+        return call.quiet === 'away'
+          ? "You're away, so your secretary is taking a message"
+          : 'Set to never ring: your secretary is taking a message';
+      }
+      if (call.state === 'ringing') return 'Ringing · your secretary is answering';
+      return voiceLine(call);
+    }
+
+    function directiveLine(call) {
+      if (!call.directive) return '';
+      const status = { sending: ' · sending', injected: ' · she has it', spoken: ' · done', failed: ` · failed${call.directiveError ? ` (${call.directiveError.replace(/_/g, ' ')})` : ''}` }[call.directiveStatus] || '';
+      return call.directive + status;
+    }
+
+    function factsHtml(details, tasks) {
+      const rows = [];
+      if (details.company) rows.push(['From', esc(details.company)]);
+      if (details.reason) rows.push(['About', esc(details.reason) + (details.urgent === true ? ' <span class="urgent">· urgent</span>' : '')]);
+      else if (details.urgent === true) rows.push(['About', '<span class="urgent">Urgent</span>']);
+      if (details.message) rows.push(['Message', esc(details.message)]);
+      const reach = [];
+      if (details.callbackNumber) reach.push(`<a href="tel:${esc(details.callbackNumber.replace(/[^\d+]/g, ''))}">${esc(details.callbackNumber)}</a>`);
+      if (details.callbackEmail) reach.push(`<a href="mailto:${esc(details.callbackEmail)}">${esc(details.callbackEmail)}</a>`);
+      if (details.bestTime) reach.push(esc(details.bestTime));
+      if (reach.length) rows.push(['Reach them', reach.join(' · ')]);
+      for (const t of tasks || []) rows.push(['Task', esc(t.text) + (t.due ? ` <span class="muted small">· due ${esc(new Date(t.due).toLocaleDateString())}</span>` : '')]);
+      return rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    }
+
+    function render() {
+      renderCall();
+      renderOwner();
+    }
+
+    function renderCall() {
+      const panel = $('callPanel');
+      const call = S.call;
+      if (!call) {
+        if (endedFlash) {
+          panel.classList.remove('hidden');
+          $('avatar').textContent = initial(endedFlash.name);
+          $('avatar').classList.remove('ringing');
+          $('callerName').textContent = endedFlash.name;
+          $('trustLine').textContent = '';
+          $('trustNote').textContent = '';
+          $('facts').innerHTML = '';
+          $('callStatus').textContent = endedFlash.reason;
+          $('directive').textContent = '';
+          $('talk').innerHTML = '';
+          $('controls').innerHTML = '';
+          $('extraActions').innerHTML = '';
+          $('relayBox').classList.add('hidden');
+          $('waitingStrip').textContent = '';
+          $('screeningBox').classList.add('hidden');
+        } else {
+          panel.classList.add('hidden');
+        }
+        if (S.registered) setStatus('connected', S.mode === 'demo' && awayNow() ? 'Waiting for calls · you are away' : 'Waiting for calls');
+        return;
+      }
+      panel.classList.remove('hidden');
+      $('screeningBox').classList.remove('hidden');
+      const name = call.details.name || (call.verified && call.verified.name) || 'Someone is calling';
+      $('avatar').textContent = initial(call.details.name || (call.verified && call.verified.name) || '?');
+      $('avatar').classList.toggle('ringing', call.state === 'ringing');
+      $('callerName').textContent = name;
+      const trust = call.trust || { level: 'unverified', label: 'Not verified', warnings: [] };
+      $('trustLine').textContent = trust.label;
+      $('trustLine').className = `trust ${trust.level}`;
+      $('trustNote').textContent = trust.warnings[0] || '';
+      $('facts').innerHTML = factsHtml(call.details, call.tasks);
+      $('callStatus').textContent = statusLine(call);
+      $('directive').textContent = directiveLine(call);
+      $('talk').innerHTML = call.talk.slice(-4).map(t => `<p><span class="who">${esc(t.speaker)}</span>${esc(t.text)}</p>`).join('');
+
+      const muteButton = button('mic', S.muted ? 'Unmute' : 'Mute', 'toggleMute()', '', S.muted);
+      let controls = '';
+      if (call.state === 'ringing' || call.state === 'quiet') {
+        controls = button('phone', 'Answer', 'answer()', 'go') + button('connect', 'Put through', 'putThrough()') +
+          button('message', 'Message', 'toggleRelay()') + button('end', 'End', 'endCall()', 'stop');
+      } else if (call.state === 'answered' || call.state === 'holding') {
+        controls = button('connect', 'Put through', 'putThrough()', 'go') +
+          (call.state === 'holding' ? '' : button('hold', 'Hold', 'hold(2)')) +
+          button('message', 'Message', 'toggleRelay()') + muteButton + button('end', 'End', 'endCall()', 'stop');
+      } else if (call.state === 'patched') {
+        controls = muteButton + button('end', 'Hang up', 'hangUp()', 'stop');
+      } else if (call.state === 'bridged') {
+        controls = muteButton + button('end', 'Hang up', 'hangUp()', 'stop');
+      }
+      $('controls').innerHTML = controls;
+
+      const extras = [];
+      if ((call.state === 'answered' || call.state === 'holding') && ['ended', 'error', 'off'].includes(call.voice)) {
+        extras.push('<button class="text" onclick="startVoice()">Talk to your secretary</button>');
+      }
+      if (S.mode === 'demo' && call.device && call.state !== 'bridged' && call.state !== 'patched') {
+        extras.push('<button class="text danger" onclick="blockAndEnd()">Impostor or spam: block and end</button>');
+      }
+      $('extraActions').innerHTML = extras.join(' &nbsp; ');
+
+      const waiting = [...S.others.values()].filter(c => c.state === 'waiting');
+      $('waitingStrip').textContent = waiting.length
+        ? `Also calling: ${waiting.map(c => c.details.name || 'someone').join(', ')}. Your secretary is with them.`
+        : '';
+      renderScreening();
+      setStatus('connected', 'On a call');
+    }
+
+    function renderScreening() {
+      const call = S.call;
+      if (!call) return;
+      $('screening').innerHTML = call.screening.map(t =>
+        `<p><strong>${t.speaker === 'Secretary' ? 'Secretary' : esc(call.details.name || 'Caller')}:</strong> ${esc(t.text)}</p>`).join('') ||
+        '<p class="muted">Nothing yet.</p>';
+    }
+
+    function renderOwner() {
+      if (S.mode !== 'demo') return;
+      const a = S.owner.availability;
+      const current = awayNow() ? a.mode : 'available';
+      for (const b of $('availability').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.mode === current));
+      $('availabilityNote').textContent = current === 'busy'
+        ? `Until ${a.untilLabel}: calls don't ring, your secretary takes messages and says when you'll be free.`
+        : current === 'dnd'
+          ? "Calls don't ring; your secretary takes messages. People you set to always ring still get through."
+          : '';
+      $('links').innerHTML = S.owner.links.map(l => `
+        <div class="item">
+          <div class="row"><strong>${esc(l.name)}</strong>
+            <button class="text" onclick="copyText('${esc(personalLink(l.token))}', this)">Copy link</button>
+            <button class="text danger" onclick="revokeLink('${l.token}')">Revoke</button></div>
+          <code>${esc(personalLink(l.token))}</code>
+          <label class="check" style="margin-top:6px"><input type="checkbox" ${l.alwaysRing ? 'checked' : ''} onchange="toggleAlwaysRing('${l.token}')"> Always ring, even when you're away</label>
+        </div>`).join('');
+      $('blocked').innerHTML = S.owner.blocked.length
+        ? '<label>Blocked browsers</label>' + S.owner.blocked.map(b => `
+          <div class="item"><div class="row"><strong>${esc(b.name || 'A caller')}</strong>
+          <button class="text" onclick="unblock('${esc(b.device)}')">Unblock</button></div></div>`).join('')
+        : '';
+    }
+
+    const OUTCOMES = {
+      talked: 'You talked',
+      message: 'Your secretary took a message',
+      blocked: 'Blocked',
+      hungUp: 'Hung up before you answered',
+      waited: 'Hung up while you were on another call',
+      missed: 'Called while this page was closed',
+      ended: 'Ended',
+    };
+
+    function renderRecords() {
+      const list = records();
+      $('history').classList.toggle('hidden', list.length === 0);
+      $('records').innerHTML = list.map(r => {
+        const when = new Date(r.endedAt || r.startedAt || Date.now());
+        const summary = r.summary || r.reason || '';
+        return `<div class="item">
+          <div class="row"><strong>${esc(r.name || 'Unknown caller')}</strong><span class="when">${esc(when.toLocaleDateString())} ${esc(timeLabel(when))}</span></div>
+          <div class="sub">${esc(OUTCOMES[r.outcome] || 'Ended')}${r.trust ? ` · ${esc(r.trust)}` : ''}</div>
+          ${summary ? `<div>${esc(summary)}</div>` : ''}
+          <dl class="facts" style="margin-top:6px">${factsHtml({ ...r, reason: '' }, r.tasks)}</dl>
+          ${r.actionItem ? `<div class="sub">To do: ${esc(r.actionItem)}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    init();
+  </script>
+</body>
+</html>

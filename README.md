@@ -26,6 +26,7 @@ Built solo in Pakistan for the [lablab.ai AssemblyAI Voice Agent Hackathon](http
 | **Hear the secretary (caller side)** | Open https://aivs.up.railway.app and press Call. Works in any desktop browser with a microphone. |
 | **See both sides** | Watch the demo video (link in the submission). Caller page on the left, phone on the right, in one take. |
 | **Be the owner yourself** | Install the **[demo APK](https://github.com/kabeerkhanniazi/awaaz-voice-secretary/releases/tag/demo-apk-1)** on an Android phone. Open it: the Calls tab shows **Your demo line** with a link. Open that link on a laptop and press Call. Your phone rings, and you play Kabeer. No account, no API key, no secret to type. See [The demo line](#the-demo-line). |
+| **Be the owner in a browser, iPhone included** | Open https://awaaz-demo.up.railway.app/owner and press **Start taking calls**. The page shows your own demo line link. Open that link on another device and press Call. The page rings, your secretary briefs you, and you can put the caller through. Nothing to install. |
 | **Run the whole thing yourself** | See [Run it yourself](#run-it-yourself). You need a free AssemblyAI key. |
 
 ---
@@ -97,7 +98,7 @@ Run these yourself:
 
 | Check | Command | Result |
 |---|---|---|
-| Gateway routing, roles, security, message-taking, demo-line isolation, personal links, blocking, availability | `cd gateway && npm install && npm test` | 27 checks pass |
+| Gateway routing, roles, security, message-taking, demo-line isolation, personal links, blocking, availability, the owner page | `cd gateway && npm install && npm test` | 28 checks pass |
 | Flutter app: state machine, voice commands, missed calls, caller trust, call-back details, demo build | `cd app && flutter test` | 34 tests pass |
 | Static analysis | `cd app && flutter analyze --fatal-infos` | no issues |
 
@@ -166,8 +167,9 @@ cd app && flutter build apk --release --dart-define=AWAAZ_DEMO_GATEWAY=wss://<yo
 |---|---|
 | **Caller side** | Any modern desktop or mobile browser with a microphone. Nothing to install. |
 | **Owner side, Android** | Fully supported: lock-screen ringing, a foreground service, and native voice-call audio (`AudioTrack` with `USAGE_VOICE_COMMUNICATION`) so echo cancellation works during the live bridge. |
-| **Owner side, iOS** | **Not shipped.** The audio player and the ringing service are Android-native (Kotlin). iOS needs a Swift equivalent plus CallKit and PushKit, a Mac to build, and a paid Apple account. The `app/ios` folder is the stock Flutter scaffold and is not wired up. |
-| **Owner side, web** | The Flutter app compiles for web, but the voice path would be dead there: audio playback and the ringing service are platform channels with no web implementation. A purpose-built **owner console page** is the planned answer, so any device, iPhone included, can take a call without installing anything. |
+| **Owner side, any browser (iPhone included)** | **The owner page**, [`gateway/web/owner.html`](gateway/web/owner.html), served at `/owner`. It covers the whole call: the briefing, voice commands, put through, hold, message, end, and the live bridge, plus caller trust and call records with AI summaries. On a demo line, the page also manages availability, personal links and blocking. On the live line, it asks for the secret and leaves those settings to the phone app, so it never overwrites them. It rings only while the page is open: there's no lock-screen ringing. |
+| **Owner side, iOS app** | **Not shipped.** The audio player and the ringing service are Android-native (Kotlin). iOS needs a Swift equivalent plus CallKit and PushKit, a Mac to build, and a paid Apple account. The `app/ios` folder is the stock Flutter scaffold and is not wired up. On an iPhone, use the owner page. |
+| **Flutter app on the web** | Not used. The app compiles for web, but its audio playback and ringing are Android platform channels with no web implementation, so calls would have no sound. The owner page covers this case. |
 
 ## Limits
 

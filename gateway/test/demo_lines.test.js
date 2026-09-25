@@ -130,6 +130,17 @@ async function run() {
   assert.strictEqual(record.line, undefined, 'internal line field is not sent');
   console.log('PASS: hang-ups and missed calls stay on their line');
 
+  // The owner page: any browser can take the calls for its own line
+  const owner = await fetch(`${HTTP}/owner`);
+  const ownerHtml = await owner.text();
+  assert.strictEqual(owner.status, 200, 'the owner page is served');
+  assert.match(owner.headers.get('content-type') || '', /text\/html/);
+  assert.ok(ownerHtml.includes('Take your calls') && ownerHtml.includes("type: 'REGISTER_MOBILE', line: S.line"),
+    'the owner page registers with a line code on a demo deployment');
+  assert.ok(!/OWNER_SETTINGS[^\n]*S\.mode !== 'demo'/.test(ownerHtml) && ownerHtml.includes("if (S.mode !== 'demo' || !S.registered) return;"),
+    'the owner page sends settings only on a demo line, so it never overwrites the phone app\'s');
+  console.log('PASS: the owner page is served and keeps to its own line');
+
   console.log('ALL DEMO LINE CHECKS PASSED');
   process.exit(0);
 }

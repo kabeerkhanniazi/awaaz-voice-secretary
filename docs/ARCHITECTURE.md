@@ -95,6 +95,7 @@ Only a socket that registered with the secret may act as a phone; a caller socke
 
 HTTP:
 - `GET /`: the caller page.
+- `GET /owner`: the owner page, which takes calls in any browser, iPhone included. On a demo line it registers with its own line code and keeps its availability, links and blocks in the browser. On the live line it asks for the secret and sends no settings, so it never overwrites the phone app's.
 - `GET /api/voice-token`: rate-limited.
 - `POST /api/call {device?, from?, line?}`: rate-limited. Returns `verifiedName` for a personal link, and `403` for a blocked browser.
 - `POST /api/analyze-call`: needs `X-Awaaz-Secret`, or `X-Awaaz-Line` of a registered demo line.
