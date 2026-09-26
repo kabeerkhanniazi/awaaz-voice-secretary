@@ -1,7 +1,10 @@
 # Awaaz: how it works today
 
-The source of truth for the current system. Other documents in `docs/` and the root
-`*.md` files describe earlier plans; where they disagree with this file, this file wins.
+The reference for the current system: its components, what each one owns, and every message between them. Related documents:
+- [WORKFLOW.md](WORKFLOW.md): a call step by step, with diagrams;
+- [TECH_STACK.md](TECH_STACK.md): versions and tuning values;
+- [SCENARIOS.md](SCENARIOS.md): every situation a call can end up in;
+- [the documentation index](README.md): everything else.
 
 ## The product
 

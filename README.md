@@ -31,6 +31,24 @@ Built solo in Pakistan for the [lablab.ai AssemblyAI Voice Agent Hackathon](http
 
 ---
 
+## Documentation
+
+| | |
+|---|---|
+| [Architecture](docs/ARCHITECTURE.md) | Components, state, and every gateway message |
+| [Tech stack](docs/TECH_STACK.md) | Every technology and version, tuning values, audio formats, and why |
+| [Workflow](docs/WORKFLOW.md) | The life of a call, message by message, with diagrams; how Awaaz is built and shipped |
+| [All possible scenarios](docs/SCENARIOS.md) | Over 100 situations: what the caller, the owner and the record see in each |
+| [Building on the Voice Agent API](docs/VOICE_AGENT_API_NOTES.md) | How both agents are wired and steered, lessons from the live API, and costs |
+| [Security and privacy](docs/SECURITY.md) | Keys, roles, abuse controls, caller trust, and data retention |
+| [User guide](docs/USER_GUIDE.md) | For callers, owners and judges, with a voice-command cheat sheet |
+| [Deployment](docs/DEPLOYMENT.md) | Environment, local runs, Railway for both lines, building and releasing the app |
+| [Testing](docs/TESTING.md) | All 62 automated checks by name, plus the live tests |
+| [Roadmap](docs/ROADMAP.md) | What's done, and what comes next |
+| [FAQ](docs/FAQ.md) and [Glossary](docs/GLOSSARY.md) | Quick answers, and the words used throughout |
+
+---
+
 ## How a call works
 
 ```
@@ -52,7 +70,9 @@ Built solo in Pakistan for the [lablab.ai AssemblyAI Voice Agent Hackathon](http
  between the caller's browser and the phone. Two humans, no AI in the middle.
 ```
 
-Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Full detail:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the components and every message;
+- [docs/WORKFLOW.md](docs/WORKFLOW.md): each step of a call, with sequence diagrams.
 
 ## Who is really calling
 
@@ -92,6 +112,8 @@ Things we learned the hard way against the live API. Each one is handled in the 
 5. **`system_prompt` can be changed mid-session** and the agent honours it. `conversation.message` was accepted but ignored in practice, so live context goes into the prompt.
 6. **A detached `ArrayBuffer` has length 0.** After posting mic audio from an AudioWorklet, read the chunk size *before* transferring it.
 
+More lessons, with the full wiring of both agents: [docs/VOICE_AGENT_API_NOTES.md](docs/VOICE_AGENT_API_NOTES.md).
+
 ## Evidence
 
 Run these yourself:
@@ -102,7 +124,7 @@ Run these yourself:
 | Flutter app: state machine, voice commands, missed calls, caller trust, call-back details, demo build | `cd app && flutter test` | 34 tests pass |
 | Static analysis | `cd app && flutter analyze --fatal-infos` | no issues |
 
-Both suites run in CI on every push ([.github/workflows/ci.yml](.github/workflows/ci.yml)), with no API key and no network.
+Both suites run in CI on every push ([.github/workflows/ci.yml](.github/workflows/ci.yml)), with no API key and no network. Every check is listed by name, with the live tests against the real API, in [docs/TESTING.md](docs/TESTING.md).
 
 ## Security and privacy
 
@@ -113,6 +135,9 @@ Both suites run in CI on every push ([.github/workflows/ci.yml](.github/workflow
 - The caller page keeps a random, anonymous id in the browser so a repeat caller can be recognised or blocked. The page footer says so. It isn't a fingerprint, and it goes nowhere except your own gateway.
 - Personal-link tokens are random and revocable, and live only on your phone and your gateway.
 - Call records, tasks and contacts stay on the phone. The gateway keeps a call in memory only while it is live, plus up to 24 hours for calls the phone has not logged yet.
+- Every deploy passes a secret scan against the real key values, and the tests, before anything is pushed.
+
+More: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Run it yourself
 
@@ -141,6 +166,8 @@ Then in the app: **Settings → Gateway** = `ws://<your-machine>:3000` (or your 
 
 Requires Flutter (see [`app/.flutter-version`](app/.flutter-version)) and an Android device or emulator on Android 8+. Permissions used: microphone, notifications, contacts (optional, for "how you know them"), and a foreground service for ringing while closed.
 
+Every environment variable, hosting on Railway, and building and signing the app: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## The demo line
 
 The live line rings Kabeer's own phone, so its secret stays private. For judges there is a separate **demo line**: the same gateway code, deployed a second time with `DEMO_MODE=1`.
@@ -161,7 +188,7 @@ cd gateway && DEMO_MODE=1 npm start
 cd app && flutter build apk --release --dart-define=AWAAZ_DEMO_GATEWAY=wss://<your demo host>
 ```
 
-## Platform support, honestly
+## Platform support
 
 | Platform | State |
 |---|---|
@@ -171,24 +198,102 @@ cd app && flutter build apk --release --dart-define=AWAAZ_DEMO_GATEWAY=wss://<yo
 | **Owner side, iOS app** | **Not shipped.** The audio player and the ringing service are Android-native (Kotlin). iOS needs a Swift equivalent plus CallKit and PushKit, a Mac to build, and a paid Apple account. The `app/ios` folder is the stock Flutter scaffold and is not wired up. On an iPhone, use the owner page. |
 | **Flutter app on the web** | Not used. The app compiles for web, but its audio playback and ringing are Android platform channels with no web implementation, so calls would have no sound. The owner page covers this case. |
 
-## Limits
+## Future enhancements
 
-- Callers reach a web page, not a real phone number. A SIP/PSTN number is the next step.
-- One owner per deployment. A second caller is screened and waits their turn.
-- Missed calls live in the gateway's memory, so a restart before the phone reconnects loses them.
-- The secretary's persona names "Kabeer" (see `SECRETARY_SYSTEM_PROMPT` in `gateway/server.js`); change it for your own deployment.
-- The post-call summary uses the only model this AssemblyAI account can reach; override with `SUMMARY_MODEL`.
-- **English only.** The Voice Agent API supports six languages (English, Spanish, French, German, Italian, Portuguese), and Urdu and Hindi aren't among them, so a caller she can't understand is asked to continue in English or leave a number. A real Urdu secretary would use AssemblyAI's real-time transcription (which supports Urdu) with your own model and voice, and is on the roadmap.
-- Verifying a *stranger* (someone with no personal link) still means checking them yourself, on a number or email you find. Emailing them a one-time code is the next step.
+What comes next, in the order that matters most (the full plan, with the reasons, is in [docs/ROADMAP.md](docs/ROADMAP.md)):
+
+- **A real phone number.** Calls to a number, or forwarded from yours, enter the same gateway as the caller page. The audio is already PCM16, so it's a new front door on the same system.
+- **Urdu, and mixing Urdu and English.** The secretary becomes AssemblyAI's real-time transcription, which understands Urdu, plus a model through the LLM Gateway and an Urdu voice.
+- **Your own secretary.** Accounts with your name, pronouns, voice and greeting, instead of a persona built for one owner.
+- **Persistence and push.** Missed calls, settings and links in a database, and push notifications as a backup to the standby service.
+- **Verify strangers.** Email a one-time code the caller reads back, so someone with no personal link can still be verified.
+- **Calendar-aware availability.** Busy blocks in your calendar set your availability, and meeting titles are never shared.
+- **Recognition hints.** Your contacts' names become speech-recognition hints, so "Brightline" and Urdu names are heard right.
+- **iPhone.** The owner page becomes an installable app with web push, then a native iOS app with CallKit.
+- **Teams.** One secretary for a small firm: "Who would you like to speak to?", then the right person's phone rings.
+- **Integrations.** Summaries and tasks sent to calendars, CRMs and to-do apps.
 
 ## Project history
 
-- **26 Aug 2026** — first prototype commits, then named "Vox Sonus".
-- **1–30 Sep 2026** — Awaaz built during the hackathon window: the two-agent design, the live bridge, the Android app, message taking, waiting callers, tasks with due dates.
-- This repository is the **Hackathon Edition**: a clean snapshot of the submitted system, published under MIT. It was assembled as a fresh tree, so the commit history here starts at the snapshot; the gateway's development history lives in the original repository (`kabeerkhanniazi/Awaaz`, branch `sidekick-server`).
+How Awaaz went from a prototype to the submitted system: over 50 commits across two repositories, built solo in Pakistan.
+
+### August 2026: the prototype
+
+- **26 Aug.** The first prototype, **"Vox Sonus"**: five voice agents on the AssemblyAI Voice Agent API. The same day it's renamed **Awaaz**, "voice" in Urdu. A bilingual path is dropped, and the first interface, a glowing orb, is reworked. It was later replaced altogether by a plain, calm design.
+
+### Early September: one idea wins
+
+- The project settles on one idea: **a secretary that keeps you in the call.** One agent screens the caller, a second briefs the owner privately, and the owner decides while the caller is still on the line.
+- **14 Sep.** The server repository is reset to hold only the gateway that Railway deploys to `aivs.up.railway.app`.
+
+### 18 September: the gateway grows up
+
+Thirteen changes in one day:
+- The voice agent's connection and **persona drift** are fixed; the secretary had been slipping out of character.
+- A **gateway secret and socket roles**: only the owner's phone may direct calls, and a caller may report only on its own call.
+- The caller's microphone streaming is fixed, and the **Patch In audio bridge** arrives: "put her through" connects two people directly, with no AI in between.
+- The caller page shows only the call's status, never a transcript.
+- **The owner's own voice session** with the secretary, the second agent.
+- Caller details are recorded as data, and briefings use **confirmed facts only**.
+- **AI call summaries** through the AssemblyAI LLM Gateway.
+- A minimal redesign of the caller page: light and dark, mute, a call timer.
+- Briefings mention **how the owner knows the caller**.
+- **Dictated tasks** keep their due dates.
+- **Message-taking** when the owner doesn't answer. It also brought the first hard lesson: a `reply.create` sent while the agent is speaking is **silently dropped**, so replies are now held until she finishes.
+- Call-back numbers are saved as digits.
+- **Waiting callers**: a second caller is screened and waits, and the owner's secretary knows who else is calling.
+
+### 19 September: the app, and discipline
+
+- The Android app gets its own version history; it had been developed in another workspace before.
+- **AwaazService**: the phone rings over the lock screen even when the app is closed, and calls stay alive with the screen off. Firebase push was considered, and a native standby service chosen instead, so it works without any third-party account.
+- A redesign of the app: a minimal full-screen call UI, a calm theme, and only real data.
+- The gateway secret moves into the **Android Keystore**, and CI now runs the real tests.
+- The call screen shows whether the secretary has actually told the caller what you asked.
+- Two more lessons from the live API:
+  - tool results swallow a reply sent at the same moment, so held replies now wait a beat;
+  - the secretary ends calls herself after the goodbye.
+- The secretary tells callers "Kabeer is on another call" when he is, and "busy" means only a live bridge.
+- **Hackathon research:** all 84 other submissions read and compared, and the official 1–5 scoring rubric found in the rules page's source.
+
+### 20–21 September: public, and a line for every judge
+
+- **20 Sep.** This Hackathon Edition is published under MIT, with CI. It was assembled as a fresh tree, so its history starts here. The gateway's earlier history lives in the original repository, `kabeerkhanniazi/Awaaz` (branch `sidekick-server`, now archived).
+- **21 Sep.** **Demo lines.** A demo deployment gives every phone its own line code, with no secret, so any number of judges can play the owner at once without reaching each other's calls. A preconfigured demo build, and a caller page that explains the line it's on.
+
+### 25 September: who is really calling
+
+It started with a real question: what if a caller named Ali says he's your professor?
+- **Caller trust.** Only a personal link verifies. Names stay claims. There are warnings for a browser that switches names, a borrowed link and a stale link, and the owner's secretary flags impersonation-scam patterns. One tap blocks an impostor's browser.
+- **Personal links,** sent on WhatsApp from the app and revocable, with "always ring" and "never ring".
+- **Call-back details.** The secretary never says goodbye without a number or email and the best time, read back digit by digit and confirmed.
+- **Availability.** Busy until a time, or do not disturb. Quiet calls get their message taken after 12 seconds, with "he'll be free after 3:00 PM".
+- **Tap to dial, WhatsApp and email** from calls, tasks and contacts, and sharing your call link on WhatsApp.
+- **Privacy rules** for the caller's secretary, and an honest English-only rule instead of guessing at other languages.
+- The live line is redeployed with all of it. The code moves to one place: the live line now builds from this repository, the old repository is archived, and every deploy runs a secret scan and the tests first.
+
+### 26 September: anyone, anywhere
+
+- The hosted **demo line**, `awaaz-demo.up.railway.app`, and the **demo APK release**, tested on an Android 17 emulator.
+- **The owner page.** Take calls in any browser, iPhone included, with nothing to install: the ring, the briefing, voice commands, put through, hold, message, end, and the live bridge.
+- The secretary stops guessing callers' genders: *"Someone calling as Maria Lopez from Brightline Studios… they want to talk about Friday's design review."*
+- **Documentation** for everything: the architecture, tech stack, workflow, over 100 scenarios, the Voice Agent API notes, security, deployment, testing, a user guide and the roadmap.
+
+### By the numbers
+
+| | |
+|---|---|
+| AssemblyAI Voice Agent sessions per call | 2, plus the LLM Gateway afterwards |
+| Ways to take part | 3: the caller page, the Android app, the owner page |
+| Automated checks | 62 (28 gateway, 34 app), on every push |
+| Documented scenarios | 104 |
+| Live deployments | 2, from one folder |
+| Runtime dependencies in the gateway | 2 |
 
 ## Licence and name
 
 Code is MIT licensed, see [LICENSE](LICENSE). The licence covers the code, not the name "Awaaz" or the logo.
 
 *Awaaz* means "voice" in Urdu.
+
+**Contact:** mu.kabir2004@gmail.com, or [call me through Awaaz](https://aivs.up.railway.app). If I'm busy, my secretary will take your message.
