@@ -106,7 +106,7 @@ HTTP:
 Only a personal link (`?from=TOKEN`, sent from the app to one contact, revocable) verifies a caller. Everything else is a claim:
 - A claimed name that matches a contact is shown as a match. The contact's relationship is never applied.
 - A browser that called before under another name, someone else's name on a link, or a stale link produces a warning. The rules are in `app/lib/core/caller_trust.dart`.
-- The owner's secretary briefs unverified callers as "someone who says…" and flags impersonation-scam patterns.
+- The owner's secretary briefs unverified callers as "someone calling as…" and flags impersonation-scam patterns.
 - The caller-facing secretary never shares the owner's whereabouts or details.
 
 ## Configuration
